@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 45 19% 96%;
+    --foreground: 44 17% 13%;
+    --card: 45 21% 97%;
+    --card-foreground: 44 17% 13%;
+    --popover: 45 21% 97%;
+    --popover-foreground: 44 17% 13%;
+    --primary: 183 98% 22%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 21% 97%;
+    --secondary-foreground: 44 17% 13%;
+    --muted: 45 14% 92%;
+    --muted-foreground: 44 4% 47%;
+    --accent: 183 98% 22%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 348 60% 44%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 42 13% 81%;
+    --input: 42 13% 81%;
+    --ring: 183 98% 22%;
+    --radius: 0.5rem;
+    --font-sans: "DM Sans", "Inter", system-ui, -apple-system, sans-serif;
+    --font-mono: "Geist Mono", Menlo, monospace;
+  }
+
+  .dark {
+    --background: 35 9% 9%;
+    --foreground: 50 4% 80%;
+    --card: 40 5% 10%;
+    --card-foreground: 50 4% 80%;
+    --popover: 40 5% 12%;
+    --popover-foreground: 50 4% 80%;
+    --primary: 187 35% 47%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 35 5% 12%;
+    --secondary-foreground: 50 4% 80%;
+    --muted: 35 4% 15%;
+    --muted-foreground: 30 2% 47%;
+    --accent: 187 35% 47%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 322 53% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 32 2% 23%;
+    --input: 32 2% 23%;
+    --ring: 187 35% 47%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+}
