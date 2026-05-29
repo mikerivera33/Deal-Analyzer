@@ -26,7 +26,7 @@ export function AnalysisPage({ jobId, result, onNewJob }: AnalysisPageProps) {
 
   if (!analysis) return null
 
-  const { verdict, asking, expert, scenarios, risk_register, t12, pf, property, units } = analysis
+  const { verdict, asking, expert, scenarios, risk_register, t12, broker_t2, pf, expert_income, property, units } = analysis
 
   const verdictLabel = verdict.label
   const gapSign = asking.gap_to_sc2_mao >= 0 ? '+' : ''
@@ -90,7 +90,7 @@ export function AnalysisPage({ jobId, result, onNewJob }: AnalysisPageProps) {
         <TabsContent value="math">
           <div className="rounded-xl border border-border bg-card p-5">
             <h3 className="text-sm font-semibold mb-4 text-muted-foreground uppercase tracking-wide">Income &amp; Expense Analysis</h3>
-            <IncomeTable t12={t12} pf={pf} expert={expert} />
+            <IncomeTable t12={t12} broker_t2={broker_t2} pf={pf} expert_income={expert_income} />
             <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-3">
               <MetricCard label="NOI" value={formatCurrency(expert.noi)} />
               <MetricCard label="Cap Rate" value={`${(expert.cap_rate * 100).toFixed(2)}%`} />
@@ -154,7 +154,7 @@ export function AnalysisPage({ jobId, result, onNewJob }: AnalysisPageProps) {
 
         <TabsContent value="scenarios">
           <div className="rounded-xl border border-border bg-card p-5">
-            <h3 className="text-sm font-semibold mb-4 text-muted-foreground uppercase tracking-wide">Bear / Base / Bull Scenarios</h3>
+            <h3 className="text-sm font-semibold mb-4 text-muted-foreground uppercase tracking-wide">Conservative / Moderate / Aggressive Scenarios</h3>
             <ScenarioTable scenarios={scenarios} />
           </div>
         </TabsContent>

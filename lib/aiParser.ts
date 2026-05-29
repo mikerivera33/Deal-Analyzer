@@ -13,9 +13,14 @@ const DEMO_DEAL: DealInput = {
   units: 12,
   total_sf: 9600,
   occupancy_pct: 0.95,
+  occupied_pct: 0.95,
   asking_price: 1440000,
   broker_cap_rate: 0.065,
   sale_type: 'Listed',
+  submarket: 'Midtown / Buckhead',
+  msa: 'Atlanta-Sandy Springs-Roswell',
+  renovation_status: 'Light value-add',
+  capex_per_unit: 10000,
   gross_rental_income: 132240,
   utility_reimbursement: 3600,
   other_income: 2400,
@@ -49,15 +54,23 @@ Map to this exact schema (all fields optional, use null if not found):
   "units": number (total unit count, integer),
   "total_sf": number (total square feet),
   "occupancy_pct": number (decimal 0–1, e.g. 0.95 for 95%),
+  "occupied_pct": number (decimal 0–1, alias for occupancy if labeled "occupied"),
   "asking_price": number (dollars, no commas or symbols),
   "broker_cap_rate": number (decimal 0–1, e.g. 0.065 for 6.5%),
-  "sale_type": string (e.g. "Listed", "Off-Market"),
-  "gross_rental_income": number (annual dollars, net of vacancy),
-  "utility_reimbursement": number (annual dollars),
-  "other_income": number (annual dollars),
+  "sale_type": string (e.g. "Listed", "Off-Market", "Free-and-clear"),
+  "submarket": string (submarket / neighborhood, e.g. "Telecom Corridor"),
+  "msa": string (metro statistical area, e.g. "Dallas-Fort Worth-Arlington"),
+  "renovation_status": string (renovation notes, e.g. "No (heavy reno needed)"),
+  "gross_rental_income": number (T-12 actual annual gross rent, dollars),
+  "utility_reimbursement": number (T-12 annual dollars),
+  "other_income": number (T-12 annual dollars),
+  "t2_gross_rental": number (Broker T-2 trailing-2-month annualized gross rent; null if not present),
+  "t2_utility_reimb": number (Broker T-2 annual utility reimbursement; null if not present),
+  "t2_other_income": number (Broker T-2 annual other income; null if not present),
   "pf_gross_rental": number (pro-forma annual gross rent, dollars),
   "pf_other_income": number (pro-forma annual other income, dollars),
   "pf_utility_reimb": number (pro-forma annual utility reimbursement, dollars),
+  "capex_per_unit": number (renovation/CapEx budget per unit in dollars; default 10000 if value-add),
   "property_taxes": number (annual dollars),
   "insurance": number (annual dollars),
   "management_fee": number (annual dollars),
@@ -87,7 +100,7 @@ function coerceDealInput(raw: unknown): DealInput | null {
   const deal: DealInput = {}
 
   // String fields — take as-is if string, else ignore
-  const strFields = ['property_name', 'address', 'city', 'state', 'zip_code', 'sale_type', 'notes'] as const
+  const strFields = ['property_name', 'address', 'city', 'state', 'zip_code', 'sale_type', 'submarket', 'msa', 'renovation_status', 'notes'] as const
   for (const f of strFields) {
     const v = obj[f]
     if (v != null && v !== '') deal[f] = String(v).slice(0, 500)
@@ -95,9 +108,11 @@ function coerceDealInput(raw: unknown): DealInput | null {
 
   // Numeric fields — coerce through safeNum
   const numFields = [
-    'year_built', 'units', 'total_sf', 'occupancy_pct', 'asking_price', 'broker_cap_rate',
+    'year_built', 'units', 'total_sf', 'occupancy_pct', 'occupied_pct', 'asking_price', 'broker_cap_rate',
     'gross_rental_income', 'utility_reimbursement', 'other_income',
+    't2_gross_rental', 't2_utility_reimb', 't2_other_income',
     'pf_gross_rental', 'pf_other_income', 'pf_utility_reimb',
+    'capex_per_unit',
     'property_taxes', 'insurance', 'management_fee', 'utilities', 'reserves',
   ] as const
   for (const f of numFields) {

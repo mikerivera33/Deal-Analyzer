@@ -9,14 +9,20 @@ interface ScenarioTableProps {
 type RowDef = [string, (s: Scenario) => string]
 
 const ROWS: RowDef[] = [
-  ['Cap Rate', (s) => formatPercent(s.cap_rate, 2)],
+  ['Entry Cap Rate', (s) => formatPercent(s.cap_rate, 1)],
   ['MAO', (s) => formatCurrency(s.mao)],
   ['MAO / Unit', (s) => formatCurrency(s.mao_per_unit)],
-  ['DSCR', (s) => s.dscr.toFixed(3)],
-  ['DSCR Pass', (s) => s.dscr_pass ? 'PASS' : 'FAIL'],
+  ['CapEx Budget', (s) => formatCurrency(s.capex_budget)],
+  ['All-in Basis', (s) => formatCurrency(s.all_in_basis)],
+  ['Loan Amount (65% LTV)', (s) => formatCurrency(s.loan_amount)],
+  ['Annual Debt Service', (s) => formatCurrency(s.annual_debt_service)],
+  ['DSCR', (s) => s.dscr.toFixed(2) + 'x'],
+  ['DSCR Min 1.25x', (s) => s.dscr_pass ? 'PASS' : 'FAIL'],
   ['Equity Required', (s) => formatCurrency(s.equity_required)],
-  ['Exit Value', (s) => formatCurrency(s.exit_value)],
-  ['Equity Multiple', (s) => s.equity_multiple.toFixed(2) + 'x'],
+  ['Exit Cap (−1.5%)', (s) => formatPercent(s.exit_cap_rate, 1)],
+  ['Post-Opt NOI', (s) => formatCurrency(s.post_opt_noi)],
+  ['Exit Sale Value', (s) => formatCurrency(s.exit_value)],
+  ['Equity Created', (s) => formatCurrency(s.equity_created)],
 ]
 
 export function ScenarioTable({ scenarios }: ScenarioTableProps) {
