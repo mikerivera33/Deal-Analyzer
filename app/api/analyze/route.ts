@@ -92,6 +92,10 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
       steps: STEPS.map((step) => ({ step, status: 'complete' as const })),
       result: { deal, analysis, missing },
     })
+
+    // Sync to Airtable (fire-and-forget; never blocks or crashes the pipeline)
+    const { syncDealToAirtable } = await import('@/lib/airtableSync')
+    await syncDealToAirtable(deal, analysis, jobId).catch(() => {})
   } catch (err: unknown) {
     try {
       const jErr = await getJob(jobId)

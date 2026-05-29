@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { ThemeProvider } from 'next-themes'
+import Link from 'next/link'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -20,6 +21,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <nav className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--card)]/80 backdrop-blur-sm">
+            <div className="mx-auto max-w-screen-xl flex items-center gap-6 px-6 h-12">
+              <Link href="/" className="flex items-center gap-2 font-bold text-[var(--primary)] text-sm tracking-tight">
+                LJM Deal Analyzer
+              </Link>
+              <div className="flex items-center gap-4 ml-auto">
+                <Link
+                  href="/"
+                  className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  New Analysis
+                </Link>
+                <Link
+                  href="/deals"
+                  className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  Deal History
+                </Link>
+              </div>
+            </div>
+          </nav>
           {children}
         </ThemeProvider>
       </body>
