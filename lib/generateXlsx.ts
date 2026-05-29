@@ -1,9 +1,5 @@
 import type { AnalysisResult, DealInput } from './types'
 
-function numFmt(n: number | undefined, fmt = '#,##0'): string | number {
-  return n ?? 0
-}
-
 export async function generateUnderwritingXlsx(
   deal: DealInput,
   analysis: AnalysisResult
@@ -28,11 +24,17 @@ export async function generateUnderwritingXlsx(
     ['Expert NOI', analysis.expert.noi],
     ['MAO (Base 8%)', analysis.expert.mao],
     ['Gap to MAO', analysis.asking.gap_to_sc2_mao],
+    ['Gap to MAO %', `${(analysis.asking.gap_to_sc2_mao_pct * 100).toFixed(1)}%`],
     ['DSCR', analysis.expert.dscr.toFixed(3)],
     ['DSCR Pass', analysis.expert.dscr_pass ? 'PASS' : 'FAIL'],
+    ['Loan Amount (75% LTV)', analysis.expert.loan_amount],
+    ['Annual Debt Service', analysis.expert.annual_debt_service],
+    ['Annual Cash Flow', analysis.expert.annual_cash_flow],
+    ['Cash-on-Cash Return', `${(analysis.expert.cash_on_cash * 100).toFixed(1)}%`],
     ['Equity Required', analysis.expert.equity_required],
     ['Equity Multiple', analysis.expert.equity_multiple.toFixed(2) + 'x'],
-    ['Exit Value (Base)', analysis.expert.exit_value],
+    ['Exit Value (Base 5yr)', analysis.expert.exit_value],
+    ['Expense Ratio', `${(analysis.expert.expense_ratio * 100).toFixed(1)}%`],
   ]
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryData)
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')

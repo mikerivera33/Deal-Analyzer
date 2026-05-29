@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getJob } from '@/lib/blobStore'
+import { isValidUUID } from '@/lib/utils'
+
+const ALLOWED_TYPES = new Set(['advisory_pdf', 'deal_json', 'underwriting_xlsx', 'synthesis_xlsx'])
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: { jobId: string; type: string } }
 ) {
+  if (!isValidUUID(params.jobId)) {
+    return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 })
+  }
+  if (!ALLOWED_TYPES.has(params.type)) {
+    return NextResponse.json({ error: 'Unknown download type' }, { status: 400 })
+  }
+
   const job = await getJob(params.jobId)
   if (!job || job.status !== 'complete' || !job.result?.analysis || !job.result?.deal) {
     return NextResponse.json({ error: 'Job not ready' }, { status: 404 })
@@ -32,6 +42,7 @@ export async function GET(
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="advisory-${slug}.pdf"`,
+          'X-Content-Type-Options': 'nosniff',
         },
       })
     }
@@ -43,6 +54,7 @@ export async function GET(
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="underwriting-${params.jobId}.xlsx"`,
+          'X-Content-Type-Options': 'nosniff',
         },
       })
     }
@@ -54,6 +66,7 @@ export async function GET(
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="synthesis-${params.jobId}.xlsx"`,
+          'X-Content-Type-Options': 'nosniff',
         },
       })
     }

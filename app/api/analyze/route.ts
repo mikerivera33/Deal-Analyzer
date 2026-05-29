@@ -2,26 +2,42 @@ import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuid } from 'uuid'
 import { storeJob, getJob } from '@/lib/blobStore'
 import type { Job, DealInput } from '@/lib/types'
+import { isSafeUrl } from '@/lib/utils'
+
+// Rate limiting note: enforce per-IP limits via Vercel middleware or an upstream proxy.
+const MAX_FILE_BYTES = 100 * 1024 * 1024  // 100 MB
+const MAX_URL_LENGTH = 2048
+const ALLOWED_EXTENSIONS = new Set(['pdf', 'xlsx', 'xls', 'csv', 'txt'])
+const ALLOWED_EXTENSIONS_LIST = 'pdf, xlsx, xls, csv, txt'
 
 const STEPS = ['ingest', 'extract', 'reconcile', 'compute', 'generate']
 
 function makeSteps(activeIndex = 0) {
   return STEPS.map((step, i) => ({
     step,
-    status: i < activeIndex ? 'complete' as const : i === activeIndex ? 'in_progress' as const : 'pending' as const,
+    status:
+      i < activeIndex
+        ? ('complete' as const)
+        : i === activeIndex
+        ? ('in_progress' as const)
+        : ('pending' as const),
   }))
 }
 
-async function updateJob(id: string, partial: Partial<Job>) {
-  const existing = (await getJob(id)) as Job | null
-  if (!existing) return
-  await storeJob({ ...existing, ...partial })
+/** Safe error message — never expose internal stack traces to the client */
+function clientError(err: unknown): string {
+  if (err instanceof Error) {
+    // Strip file paths and stack frames
+    return err.message.split('\n')[0].replace(/\(.*?\)/g, '').trim().slice(0, 200)
+  }
+  return 'An unexpected error occurred'
 }
 
 async function processJob(jobId: string, text: string | null, manualDeal: DealInput | null) {
   try {
     // Step 0: ingest complete
-    await storeJob({ ...(await getJob(jobId) as Job), steps: makeSteps(1) })
+    const j0 = await getJob(jobId) as Job
+    await storeJob({ ...j0, steps: makeSteps(1) })
 
     let deal: DealInput
     let isDemo = false
@@ -29,7 +45,8 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
 
     if (manualDeal) {
       deal = manualDeal
-      await storeJob({ ...(await getJob(jobId) as Job), steps: makeSteps(2) })
+      const j1 = await getJob(jobId) as Job
+      await storeJob({ ...j1, steps: makeSteps(2) })
     } else {
       // Step 1: extract — call AI
       const { parseDealFromText } = await import('@/lib/aiParser')
@@ -37,12 +54,14 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
       deal = result.deal
       isDemo = result.isDemo
       missing = result.missing
-      await storeJob({ ...(await getJob(jobId) as Job), steps: makeSteps(2) })
+      const j1 = await getJob(jobId) as Job
+      await storeJob({ ...j1, steps: makeSteps(2) })
 
       // If critical fields missing → needs_manual
       if (missing.length > 0 && !isDemo) {
+        const j2 = await getJob(jobId) as Job
         await storeJob({
-          ...(await getJob(jobId) as Job),
+          ...j2,
           status: 'needs_manual',
           steps: makeSteps(2),
           result: { deal, missing },
@@ -52,29 +71,36 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
     }
 
     // Step 2: reconcile
-    await storeJob({ ...(await getJob(jobId) as Job), steps: makeSteps(3) })
+    const j2 = await getJob(jobId) as Job
+    await storeJob({ ...j2, steps: makeSteps(3) })
 
     // Step 3: compute
     const { runDealEngine } = await import('@/lib/dealEngine')
     const analysis = runDealEngine(deal)
-    await storeJob({ ...(await getJob(jobId) as Job), steps: makeSteps(4) })
+    const j3 = await getJob(jobId) as Job
+    await storeJob({ ...j3, steps: makeSteps(4) })
 
     // Step 4: generate
-    await storeJob({ ...(await getJob(jobId) as Job), steps: makeSteps(5) })
+    const j4 = await getJob(jobId) as Job
+    await storeJob({ ...j4, steps: makeSteps(5) })
 
     // Complete
+    const j5 = await getJob(jobId) as Job
     await storeJob({
-      ...(await getJob(jobId) as Job),
+      ...j5,
       status: 'complete',
       steps: STEPS.map((step) => ({ step, status: 'complete' as const })),
       result: { deal, analysis, missing },
     })
   } catch (err: unknown) {
-    await storeJob({
-      ...(await getJob(jobId) as Job),
-      status: 'error',
-      error: (err as Error).message,
-    })
+    try {
+      const jErr = await getJob(jobId)
+      if (jErr) {
+        await storeJob({ ...jErr, status: 'error', error: clientError(err) })
+      }
+    } catch {
+      // If we can't even store the error, there's nothing more we can do
+    }
   }
 }
 
@@ -99,24 +125,44 @@ export async function POST(request: NextRequest) {
     let manualDeal: DealInput | null = null
 
     if (demo) {
-      // Demo mode — no text extraction needed
       text = ''
     } else if (manualRaw) {
-      // Manual form submission
-      manualDeal = JSON.parse(manualRaw as string) as DealInput
+      // Parse and validate manual deal JSON
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(manualRaw as string)
+      } catch {
+        return NextResponse.json({ error: 'Invalid JSON in manual field' }, { status: 400 })
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return NextResponse.json({ error: 'Invalid deal data' }, { status: 400 })
+      }
+      manualDeal = parsed as DealInput
     } else if (file) {
-      // File upload — extract text
+      // Enforce file size limit
+      if (file.size > MAX_FILE_BYTES) {
+        return NextResponse.json({ error: 'File exceeds 100 MB limit' }, { status: 413 })
+      }
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return NextResponse.json(
+          { error: `Unsupported file type. Allowed: ${ALLOWED_EXTENSIONS_LIST}` },
+          { status: 415 }
+        )
+      }
+
       const buffer = Buffer.from(await file.arrayBuffer())
-      const ext = file.name.split('.').pop()?.toLowerCase()
+
       if (ext === 'pdf') {
         try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const pdfParse = require('pdf-parse')
           const data = await pdfParse(buffer)
           text = data.text
         } catch {
           text = `[PDF file: ${file.name}]`
         }
-      } else if (['xlsx', 'xls', 'csv'].includes(ext || '')) {
+      } else if (['xlsx', 'xls', 'csv'].includes(ext)) {
         const XLSX = await import('xlsx')
         const wb = XLSX.read(buffer, { type: 'buffer' })
         const lines: string[] = []
@@ -130,7 +176,21 @@ export async function POST(request: NextRequest) {
         text = buffer.toString('utf-8').slice(0, 50000)
       }
     } else if (urlField) {
-      // URL ingestion — attempt to fetch
+      // Validate URL length
+      if (urlField.length > MAX_URL_LENGTH) {
+        return NextResponse.json({ error: 'URL too long' }, { status: 400 })
+      }
+
+      // SSRF protection: block private IPs, loopback, metadata endpoints
+      if (!isSafeUrl(urlField)) {
+        await storeJob({
+          ...initialJob,
+          status: 'blocked',
+          result: { error: 'URL is not permitted. Only public http/https URLs are allowed.' },
+        })
+        return NextResponse.json({ jobId })
+      }
+
       try {
         const res = await fetch(urlField, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LJMDealAnalyzer/1.0)' },
@@ -140,11 +200,12 @@ export async function POST(request: NextRequest) {
         const html = await res.text()
         text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 50000)
       } catch {
-        // Mark as blocked
         await storeJob({
           ...initialJob,
           status: 'blocked',
-          result: { error: 'URL blocked by site — please download the OM PDF and upload it directly.' },
+          result: {
+            error: 'URL blocked by site — please download the OM PDF and upload it directly.',
+          },
         })
         return NextResponse.json({ jobId })
       }
@@ -157,13 +218,11 @@ export async function POST(request: NextRequest) {
       const { waitUntil } = await import('@vercel/functions')
       waitUntil(processJob(jobId, text, manualDeal))
     } catch {
-      // waitUntil not available (local dev or non-Vercel) — run inline
-      // Fire and forget in local dev
-      processJob(jobId, text, manualDeal).catch(console.error)
+      processJob(jobId, text, manualDeal).catch(() => {})
     }
 
     return NextResponse.json({ jobId })
   } catch (err: unknown) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+    return NextResponse.json({ error: clientError(err) }, { status: 500 })
   }
 }

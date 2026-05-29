@@ -1,17 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuid } from 'uuid'
-import { storeJob, getJob } from '@/lib/blobStore'
+import { storeJob } from '@/lib/blobStore'
 import type { Job, DealInput } from '@/lib/types'
+import { isValidUUID } from '@/lib/utils'
 
 const STEPS = ['ingest', 'extract', 'reconcile', 'compute', 'generate']
+
+function clientError(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message.split('\n')[0].replace(/\(.*?\)/g, '').trim().slice(0, 200)
+  }
+  return 'An unexpected error occurred'
+}
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { jobId: string } }
 ) {
+  if (!isValidUUID(params.jobId)) {
+    return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 })
+  }
+
   try {
-    const { deal } = await request.json() as { deal: DealInput }
-    if (!deal) {
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    }
+
+    const { deal } = body as { deal?: DealInput }
+    if (!deal || typeof deal !== 'object' || Array.isArray(deal)) {
       return NextResponse.json({ error: 'deal required' }, { status: 400 })
     }
 
@@ -23,7 +46,6 @@ export async function POST(
     }
     await storeJob(job)
 
-    // Run computation
     const { runDealEngine } = await import('@/lib/dealEngine')
     const analysis = runDealEngine(deal)
 
@@ -36,6 +58,6 @@ export async function POST(
 
     return NextResponse.json({ jobId: newJobId })
   } catch (err: unknown) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+    return NextResponse.json({ error: clientError(err) }, { status: 500 })
   }
 }

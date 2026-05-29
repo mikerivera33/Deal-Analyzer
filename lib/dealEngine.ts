@@ -6,7 +6,7 @@ import type {
   AnalysisResult,
   IncomeStatement,
 } from './types'
-import { pmt, loanBalance } from './utils'
+import { pmt, loanBalance, safeNum, sanitizeString } from './utils'
 
 const LTV = 0.75
 const INTEREST_RATE = 0.075
@@ -15,53 +15,75 @@ const HOLD_YEARS = 5
 const NOI_GROWTH = 0.02
 const CLOSING_COST_PCT = 0.03
 const EXPERT_VACANCY = 0.07
+const BROKER_VACANCY = 0.05
 const MGMT_FEE_PCT = 0.08
 const RESERVE_PER_UNIT = 150
 
 const SCENARIO_CAPS = [0.09, 0.08, 0.075]
 const SCENARIO_LABELS = ['Bear', 'Base', 'Bull']
 
-function grossRent(deal: DealInput): number {
-  const gross = (deal.gross_rental_income || 0) / (1 - 0.05)
-  return gross > 0 ? gross : (deal.gross_rental_income || 0)
+/**
+ * Derive annual Gross Potential Rent (GPR) from whatever income data is available.
+ * Priority: unit_mix actual_rent sum → gross_rental_income (un-vacancied from broker 5%) → 0
+ */
+function grossPotentialRent(deal: DealInput): number {
+  // If unit mix is provided with actual rents, derive GPR directly
+  if (deal.unit_mix && deal.unit_mix.length > 0) {
+    const mixTotal = deal.unit_mix.reduce(
+      (sum, u) => sum + safeNum(u.unit_count) * safeNum(u.actual_rent),
+      0
+    )
+    if (mixTotal > 0) return mixTotal * 12
+  }
+  // Otherwise reverse-engineer GPR from broker T-12 (which is net of 5% vacancy)
+  const gri = safeNum(deal.gross_rental_income)
+  if (gri > 0) {
+    return gri / (1 - BROKER_VACANCY)
+  }
+  return 0
 }
 
 function expertEgi(deal: DealInput): number {
-  const gri = grossRent(deal) * (1 - EXPERT_VACANCY)
-  return gri + (deal.other_income || 0) + (deal.utility_reimbursement || 0)
+  const gpr = grossPotentialRent(deal)
+  const egi = gpr * (1 - EXPERT_VACANCY)
+  return egi + safeNum(deal.other_income) + safeNum(deal.utility_reimbursement)
 }
 
 function expertOpEx(deal: DealInput, egi: number): number {
-  const taxes = deal.property_taxes || 0
-  const insurance = deal.insurance || 0
-  const mgmt = Math.max(deal.management_fee || 0, egi * MGMT_FEE_PCT)
-  const utilities = deal.utilities || 0
-  const reserves = Math.max(deal.reserves || 0, RESERVE_PER_UNIT * (deal.units || 1))
+  const taxes = safeNum(deal.property_taxes)
+  const insurance = safeNum(deal.insurance)
+  const mgmt = Math.max(safeNum(deal.management_fee), egi * MGMT_FEE_PCT)
+  const utilities = safeNum(deal.utilities)
+  const units = Math.max(safeNum(deal.units, 1), 1)
+  const reserves = Math.max(safeNum(deal.reserves), RESERVE_PER_UNIT * units)
   return taxes + insurance + mgmt + utilities + reserves
 }
 
 function brokerIncomeStatement(deal: DealInput): IncomeStatement {
-  const egi = (deal.gross_rental_income || 0) + (deal.other_income || 0) + (deal.utility_reimbursement || 0)
+  const egi =
+    safeNum(deal.gross_rental_income) +
+    safeNum(deal.other_income) +
+    safeNum(deal.utility_reimbursement)
   const opex =
-    (deal.property_taxes || 0) +
-    (deal.insurance || 0) +
-    (deal.management_fee || 0) +
-    (deal.utilities || 0) +
-    (deal.reserves || 0)
+    safeNum(deal.property_taxes) +
+    safeNum(deal.insurance) +
+    safeNum(deal.management_fee) +
+    safeNum(deal.utilities) +
+    safeNum(deal.reserves)
   return { egi, opex, noi: egi - opex }
 }
 
 function pfIncomeStatement(deal: DealInput): IncomeStatement {
   const egi =
-    (deal.pf_gross_rental || deal.gross_rental_income || 0) +
-    (deal.pf_other_income || deal.other_income || 0) +
-    (deal.pf_utility_reimb || deal.utility_reimbursement || 0)
+    safeNum(deal.pf_gross_rental || deal.gross_rental_income) +
+    safeNum(deal.pf_other_income || deal.other_income) +
+    safeNum(deal.pf_utility_reimb || deal.utility_reimbursement)
   const opex =
-    (deal.property_taxes || 0) +
-    (deal.insurance || 0) +
-    (deal.management_fee || 0) +
-    (deal.utilities || 0) +
-    (deal.reserves || 0)
+    safeNum(deal.property_taxes) +
+    safeNum(deal.insurance) +
+    safeNum(deal.management_fee) +
+    safeNum(deal.utilities) +
+    safeNum(deal.reserves)
   return { egi, opex, noi: egi - opex }
 }
 
@@ -101,7 +123,7 @@ function computeScenario(
   }
 }
 
-function verdictFromGap(gap: number, gapPct: number): { label: string; bg: string; fg: string } {
+function verdictFromGap(gapPct: number): { label: string; bg: string; fg: string } {
   if (gapPct >= 0) return { label: 'ACQUIRE', bg: '#16a34a', fg: '#ffffff' }
   if (gapPct > -0.1) return { label: 'NEGOTIATE', bg: '#d97706', fg: '#ffffff' }
   if (gapPct > -0.2) return { label: 'PASS', bg: '#ea580c', fg: '#ffffff' }
@@ -110,9 +132,9 @@ function verdictFromGap(gap: number, gapPct: number): { label: string; bg: strin
 
 function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[] {
   const rows: RiskRow[] = []
-  const yr = deal.year_built || 1990
+  const yr = safeNum(deal.year_built, 1990)
 
-  if (yr < 1985) {
+  if (yr > 0 && yr < 1985) {
     rows.push({
       risk: 'Deferred Maintenance / Cap-Ex',
       severity: 4,
@@ -120,7 +142,7 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
       score: 16,
       notes: `Built ${yr}. Expect roof, HVAC, plumbing replacements. Budget $8–15k/unit.`,
     })
-  } else if (yr < 2000) {
+  } else if (yr > 0 && yr < 2000) {
     rows.push({
       risk: 'Deferred Maintenance / Cap-Ex',
       severity: 3,
@@ -156,16 +178,14 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
     notes: 'Rising rates at refi could compress cash flow. Stress-test at +200 bps.',
   })
 
-  const brokerVacancy = 0.05
-  if (brokerVacancy < EXPERT_VACANCY) {
-    rows.push({
-      risk: 'Vacancy Overstatement',
-      severity: 3,
-      likelihood: 3,
-      score: 9,
-      notes: `Broker underwrites ${(brokerVacancy * 100).toFixed(0)}% vacancy; LJM uses ${(EXPERT_VACANCY * 100).toFixed(0)}% for stabilized market.`,
-    })
-  }
+  // Broker uses 5% vacancy; LJM uses 7% — always flag this discrepancy
+  rows.push({
+    risk: 'Vacancy Overstatement',
+    severity: 3,
+    likelihood: 3,
+    score: 9,
+    notes: `Broker underwrites ${(BROKER_VACANCY * 100).toFixed(0)}% vacancy; LJM uses ${(EXPERT_VACANCY * 100).toFixed(0)}% for stabilized market.`,
+  })
 
   rows.push({
     risk: 'Expense Inflation',
@@ -191,7 +211,7 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
     notes: 'Pro-forma assumes 2% NOI growth. New supply or economic slowdown could stall this.',
   })
 
-  if ((deal.asking_price || 0) > 2_000_000) {
+  if (safeNum(deal.asking_price) > 2_000_000) {
     rows.push({
       risk: 'Financing Execution',
       severity: 3,
@@ -205,8 +225,8 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
 }
 
 export function runDealEngine(deal: DealInput): AnalysisResult {
-  const askingPrice = deal.asking_price || 0
-  const units = deal.units || 1
+  const askingPrice = safeNum(deal.asking_price)
+  const units = Math.max(safeNum(deal.units, 1), 1)
 
   const egi = expertEgi(deal)
   const total_opex = expertOpEx(deal, egi)
@@ -220,9 +240,10 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
   const annual_debt_service = monthlyPayment * 12
   const dscr = annual_debt_service > 0 ? noi / annual_debt_service : 0
   const cap_rate = askingPrice > 0 ? noi / askingPrice : 0
-  const mao = SCENARIO_CAPS[1] > 0 ? noi / SCENARIO_CAPS[1] : 0
+  const baseCap = SCENARIO_CAPS[1]
+  const mao = baseCap > 0 ? noi / baseCap : 0
   const noiAtExit = noi * Math.pow(1 + NOI_GROWTH, HOLD_YEARS)
-  const exit_value = noiAtExit / SCENARIO_CAPS[1]
+  const exit_value = baseCap > 0 ? noiAtExit / baseCap : 0
   const equity_required = askingPrice * (1 - LTV) + askingPrice * CLOSING_COST_PCT
   const kPayments = HOLD_YEARS * 12
   const remainingBalance = loanBalance(monthlyRate, nper, loan, kPayments)
@@ -264,20 +285,21 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
   const pf = pfIncomeStatement(deal)
 
   const propertyDisplay: Record<string, string> = {
-    Property: deal.property_name || '—',
-    Address: deal.address || '—',
-    'City / State / ZIP': [deal.city, deal.state, deal.zip_code].filter(Boolean).join(', ') || '—',
+    Property: sanitizeString(deal.property_name) || '—',
+    Address: sanitizeString(deal.address) || '—',
+    'City / State / ZIP':
+      [deal.city, deal.state, deal.zip_code].filter(Boolean).map(sanitizeString).join(', ') || '—',
     'Year Built': deal.year_built?.toString() || '—',
     Units: deal.units?.toString() || '—',
     'Total SF': deal.total_sf ? deal.total_sf.toLocaleString() + ' sf' : '—',
     Occupancy: deal.occupancy_pct != null ? `${(deal.occupancy_pct * 100).toFixed(0)}%` : '—',
-    'Sale Type': deal.sale_type || '—',
+    'Sale Type': sanitizeString(deal.sale_type) || '—',
     'Broker Cap Rate':
       deal.broker_cap_rate != null ? `${(deal.broker_cap_rate * 100).toFixed(2)}%` : '—',
   }
 
   return {
-    verdict: verdictFromGap(gap, gapPct),
+    verdict: verdictFromGap(gapPct),
     asking: { price: askingPrice, gap_to_sc2_mao: gap, gap_to_sc2_mao_pct: gapPct },
     property: propertyDisplay,
     t12,

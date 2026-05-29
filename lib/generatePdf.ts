@@ -1,4 +1,5 @@
 import type { AnalysisResult, DealInput } from './types'
+import { sanitizeString } from './utils'
 
 export async function generateAdvisoryPdf(
   deal: DealInput,
@@ -34,13 +35,16 @@ export async function generateAdvisoryPdf(
   doc.setTextColor(20, 20, 20)
   doc.setFontSize(16)
   doc.setFont('helvetica', 'bold')
-  const propTitle = deal.property_name || deal.address || 'Unnamed Property'
+  const propTitle = sanitizeString(deal.property_name || deal.address) || 'Unnamed Property'
   doc.text(propTitle, margin, y)
   y += 18
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(80, 80, 80)
-  const addrLine = [deal.address, deal.city, deal.state, deal.zip_code].filter(Boolean).join(', ')
+  const addrLine = [deal.address, deal.city, deal.state, deal.zip_code]
+    .filter(Boolean)
+    .map(sanitizeString)
+    .join(', ')
   if (addrLine) { doc.text(addrLine, margin, y); y += 16 }
   doc.text(
     `${deal.units || '?'} units  ·  Built ${deal.year_built || '?'}  ·  ${deal.total_sf?.toLocaleString() || '?'} SF  ·  Asking ${fmt$(deal.asking_price || 0)}`,
@@ -83,9 +87,13 @@ export async function generateAdvisoryPdf(
       ['Expert Cap Rate', fmtPct(analysis.expert.cap_rate, 2)],
       ['MAO (Base 8%)', fmt$(analysis.expert.mao)],
       ['DSCR', `${analysis.expert.dscr.toFixed(3)} (${analysis.expert.dscr_pass ? 'PASS' : 'FAIL'})`],
+      ['Loan Amount (75% LTV)', fmt$(analysis.expert.loan_amount)],
+      ['Annual Debt Service', fmt$(analysis.expert.annual_debt_service)],
+      ['Annual Cash Flow', fmt$(analysis.expert.annual_cash_flow)],
+      ['Cash-on-Cash Return', fmtPct(analysis.expert.cash_on_cash, 1)],
       ['Equity Required', fmt$(analysis.expert.equity_required)],
       ['Equity Multiple (Base)', `${analysis.expert.equity_multiple.toFixed(2)}x`],
-      ['Exit Value (Base)', fmt$(analysis.expert.exit_value)],
+      ['Exit Value (Base 5yr)', fmt$(analysis.expert.exit_value)],
       ['Expense Ratio', fmtPct(analysis.expert.expense_ratio)],
     ],
     styles: { fontSize: 9, cellPadding: 5 },
