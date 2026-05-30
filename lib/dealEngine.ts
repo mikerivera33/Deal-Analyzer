@@ -9,39 +9,31 @@ import type {
 import { pmt, loanBalance, safeNum, sanitizeString } from './utils'
 
 // ─── Financing Defaults ───────────────────────────────────────────────────────
-const LTV_DEFAULT = 0.65
+const LTC_DEFAULT = 0.75           // 75% Loan-to-Cost
 const RATE_DEFAULT = 0.068
-const AMORT_MONTHS = 360  // 30 years
-const POST_OPT_UPLIFT = 1.30  // 30% NOI uplift for exit valuation
+const AMORT_MONTHS = 360
+const HOLD_YEARS = 5
+const DESIRED_CAP_DEFAULT = 0.09   // 9% target all-in yield
+const POST_OPT_UPLIFT = 1.30
+const EXIT_CAP_COMPRESSION = 0.015
 
-// ─── Underwriting Assumptions (template defaults) ─────────────────────────────
-const LTL_DEFAULT = 0.03       // loss to lease
-const VACANCY_DEFAULT = 0.04   // vacancy
-const DELINQ_DEFAULT = 0.02    // delinquency on collected rent after LTL+vac
-const BROKER_VACANCY_ASSUMED = 0.05  // used only to derive GPI from broker T-12
-const CAPEX_PER_UNIT_DEFAULT = 10_000
-const DESIRED_CAP_RATE_DEFAULT = 0.09
-// Per-unit expense defaults
-const INSURANCE_PER_UNIT = 1200
-const UTILITIES_PER_UNIT = 1456
-const RM_PER_UNIT = 750
+// ─── Income Loss Defaults ─────────────────────────────────────────────────────
+const LOSS_TO_LEASE_DEFAULT = 0.03
+const VACANCY_DEFAULT = 0.04
+const DELINQUENCY_DEFAULT = 0.02
+
+// ─── Expense Defaults ─────────────────────────────────────────────────────────
 const MGMT_FEE_PCT = 0.05
-const PAYROLL_PER_UNIT = 1100
-const ADMIN_PER_UNIT = 250
-const RESERVE_PER_UNIT = 250
-const CAPEX_CONTINGENCY_FACTOR = 1.18  // +10% contingency +8% construction mgmt
+const RESERVE_PER_UNIT = 150
+const RM_PER_UNIT_DEFAULT = 500
+const CAPEX_MULTIPLIER = 1.18       // 10% contingency + 8% construction mgmt
+const CAPEX_PER_UNIT_DEFAULT = 10_000
 
 // ─── Scenario Definitions ─────────────────────────────────────────────────────
-// Sc1 = Conservative (highest cap → lowest price)
-// Sc2 = Moderate (main MAO)
-// Sc3 = Aggressive (lowest cap → highest price)
 const SCENARIO_CAPS = [0.085, 0.080, 0.075]
 const SCENARIO_LABELS = ['Sc1 — 8.5%', 'Sc2 — 8.0%', 'Sc3 — 7.5%']
-// Exit cap = entry cap - 1.5% compression
-const EXIT_CAP_COMPRESSION = 0.015
-const HOLD_YEARS = 5
 
-// ─── Income Statement Builders ────────────────────────────────────────────────
+// ─── Income Helpers ───────────────────────────────────────────────────────────
 
 function zeroIncomeStatement(): IncomeStatement {
   return {
@@ -57,54 +49,28 @@ function zeroIncomeStatement(): IncomeStatement {
   }
 }
 
-/** T-12 actuals: vacancy already baked in, so no subtraction. GPI = reported GRI + util + other. */
+function totalReportedExpenses(deal: DealInput): number {
+  return (
+    safeNum(deal.property_taxes) +
+    safeNum(deal.insurance) +
+    safeNum(deal.management_fee) +
+    safeNum(deal.utilities) +
+    safeNum(deal.reserves) +
+    safeNum(deal.payroll) +
+    safeNum(deal.repairs_maintenance) +
+    safeNum(deal.admin_fees)
+  )
+}
+
+// ─── T-12 / Broker Income Statements ─────────────────────────────────────────
+
 function t12IncomeStatement(deal: DealInput): IncomeStatement {
   const gri = safeNum(deal.gross_rental_income)
   const util = safeNum(deal.utility_reimbursement)
   const other = safeNum(deal.other_income)
   const gpi = gri + util + other
-  // T-12 actuals — vacancy already included in reported numbers
-  const egi = gpi
-  const opex =
-    safeNum(deal.property_taxes) +
-    safeNum(deal.insurance) +
-    safeNum(deal.management_fee) +
-    safeNum(deal.utilities) +
-    safeNum(deal.reserves) +
-    safeNum(deal.payroll) +
-    safeNum(deal.repairs_maintenance) +
-    safeNum(deal.admin_fees)
-  const noi = egi - opex
-  return {
-    gross_rental_income: gri,
-    utility_reimbursement: util,
-    other_income: other,
-    gpi,
-    vacancy_bad_debt: 0,  // baked in for T-12
-    egi,
-    opex,
-    noi,
-    expense_ratio: egi > 0 ? opex / egi : 0,
-  }
-}
-
-/** Broker T-2 (trailing 2-month annualized). Returns zeroes if no T-2 data provided. */
-function brokerT2IncomeStatement(deal: DealInput): IncomeStatement {
-  const gri = safeNum(deal.t2_gross_rental)
-  const util = safeNum(deal.t2_utility_reimb)
-  const other = safeNum(deal.t2_other_income)
-  if (gri === 0 && util === 0 && other === 0) return zeroIncomeStatement()
-  const gpi = gri + util + other
-  const egi = gpi  // T-2 actuals — no vacancy adjustment
-  const opex =
-    safeNum(deal.property_taxes) +
-    safeNum(deal.insurance) +
-    safeNum(deal.management_fee) +
-    safeNum(deal.utilities) +
-    safeNum(deal.reserves) +
-    safeNum(deal.payroll) +
-    safeNum(deal.repairs_maintenance) +
-    safeNum(deal.admin_fees)
+  const egi = gpi // vacancy already baked into T-12
+  const opex = totalReportedExpenses(deal)
   const noi = egi - opex
   return {
     gross_rental_income: gri,
@@ -119,24 +85,36 @@ function brokerT2IncomeStatement(deal: DealInput): IncomeStatement {
   }
 }
 
-/** Broker Pro-Forma income statement */
+function brokerT2IncomeStatement(deal: DealInput): IncomeStatement {
+  const gri = safeNum(deal.t2_gross_rental)
+  const util = safeNum(deal.t2_utility_reimb)
+  const other = safeNum(deal.t2_other_income)
+  if (gri === 0 && util === 0 && other === 0) return zeroIncomeStatement()
+  const gpi = gri + util + other
+  const egi = gpi
+  const opex = totalReportedExpenses(deal)
+  const noi = egi - opex
+  return {
+    gross_rental_income: gri,
+    utility_reimbursement: util,
+    other_income: other,
+    gpi,
+    vacancy_bad_debt: 0,
+    egi,
+    opex,
+    noi,
+    expense_ratio: egi > 0 ? opex / egi : 0,
+  }
+}
+
 function pfIncomeStatement(deal: DealInput): IncomeStatement {
   const gri = safeNum(deal.pf_gross_rental || deal.gross_rental_income)
   const util = safeNum(deal.pf_utility_reimb || deal.utility_reimbursement)
   const other = safeNum(deal.pf_other_income || deal.other_income)
   const gpi = gri + util + other
-  // Broker PF applies a lower vacancy assumption
-  const vacancyLoss = gri * BROKER_VACANCY_ASSUMED
+  const vacancyLoss = gri * VACANCY_DEFAULT
   const egi = gpi - vacancyLoss
-  const opex =
-    safeNum(deal.property_taxes) +
-    safeNum(deal.insurance) +
-    safeNum(deal.management_fee) +
-    safeNum(deal.utilities) +
-    safeNum(deal.reserves) +
-    safeNum(deal.payroll) +
-    safeNum(deal.repairs_maintenance) +
-    safeNum(deal.admin_fees)
+  const opex = totalReportedExpenses(deal)
   const noi = egi - opex
   return {
     gross_rental_income: gri,
@@ -151,81 +129,94 @@ function pfIncomeStatement(deal: DealInput): IncomeStatement {
   }
 }
 
-// ─── Expert Underwriting ──────────────────────────────────────────────────────
+// ─── Expert Income (GPR → LTL → Vacancy → Delinquency → EGI) ─────────────────
 
-/**
- * Derive Gross Potential Rent (GPR) from available data.
- * Priority: unit_mix MARKET rent → reverse-engineer from T-12 (5% vacancy assumed)
- */
 function grossPotentialRent(deal: DealInput): number {
   if (deal.unit_mix && deal.unit_mix.length > 0) {
     const mixTotal = deal.unit_mix.reduce(
-      (sum, u) => sum + safeNum(u.unit_count) * safeNum(u.market_rent),  // MARKET not actual
+      (sum, u) => sum + safeNum(u.unit_count) * safeNum(u.market_rent),
       0
     )
     if (mixTotal > 0) return mixTotal * 12
   }
   const gri = safeNum(deal.gross_rental_income)
-  return gri > 0 ? gri / (1 - BROKER_VACANCY_ASSUMED) : 0
+  if (gri > 0) {
+    // Reverse-engineer GPR from T-12 collected rent assuming LTL + vacancy
+    const ltlRate = safeNum(deal.loss_to_lease_pct, LOSS_TO_LEASE_DEFAULT)
+    const vacRate = safeNum(deal.vacancy_pct, VACANCY_DEFAULT)
+    return gri / (1 - ltlRate - vacRate)
+  }
+  return 0
 }
 
-/**
- * Compute gross collected income using 3-tier loss waterfall.
- * Returns { gpr, otherIncome, gpi, ltl, vac, delinq, grossCollected }
- */
-function computeGrossCollected(deal: DealInput) {
+interface ExpertIncomeBreakdown {
+  gpr: number
+  loss_to_lease: number
+  vacancy_loss: number
+  delinquency_loss: number
+  gross_collected_income: number
+  egi: number
+}
+
+function expertIncomeBreakdown(deal: DealInput): ExpertIncomeBreakdown {
   const gpr = grossPotentialRent(deal)
+  const ltlRate = safeNum(deal.loss_to_lease_pct, LOSS_TO_LEASE_DEFAULT)
+  const vacRate = safeNum(deal.vacancy_pct, VACANCY_DEFAULT)
+  const delinqRate = safeNum(deal.delinquency_pct, DELINQUENCY_DEFAULT)
+
+  const loss_to_lease = gpr * ltlRate
+  const gross_collected_rent = gpr - loss_to_lease
+  const vacancy_loss = gross_collected_rent * vacRate
+  const after_vacancy = gross_collected_rent - vacancy_loss
+  const delinquency_loss = after_vacancy * delinqRate
+  const net_collected_rent = after_vacancy - delinquency_loss
+
   const util = safeNum(deal.utility_reimbursement)
   const other = safeNum(deal.other_income)
-  const otherIncome = util + other
-  const gpi = gpr + otherIncome
+  const gross_collected_income = net_collected_rent + util + other
 
-  const ltlPct = safeNum(deal.loss_to_lease_pct, LTL_DEFAULT)
-  const vacPct = safeNum(deal.vacancy_pct, VACANCY_DEFAULT)
-  const delinqPct = safeNum(deal.delinquency_pct, DELINQ_DEFAULT)
-
-  const ltl = gpr * ltlPct
-  const vac = gpr * vacPct
-  const delinq = (gpr - ltl - vac) * delinqPct
-  const grossCollected = gpi - ltl - vac - delinq
-
-  return { gpr, otherIncome, gpi, ltl, vac, delinq, grossCollected }
+  return {
+    gpr,
+    loss_to_lease,
+    vacancy_loss,
+    delinquency_loss,
+    gross_collected_income,
+    egi: gross_collected_income,
+  }
 }
 
-/** Full expert income statement breakdown for display. */
 function expertIncomeStatement(deal: DealInput, opex: number): IncomeStatement {
-  const { gpr, gpi, ltl, vac, delinq, grossCollected } = computeGrossCollected(deal)
+  const { gpr, loss_to_lease, vacancy_loss, delinquency_loss, egi } = expertIncomeBreakdown(deal)
   const util = safeNum(deal.utility_reimbursement)
   const other = safeNum(deal.other_income)
-  const totalVacancy = ltl + vac + delinq
-  const noi = grossCollected - opex
+  const noi = egi - opex
   return {
     gross_rental_income: gpr,
     utility_reimbursement: util,
     other_income: other,
-    gpi,
-    vacancy_bad_debt: -totalVacancy,
-    egi: grossCollected,
+    gpi: gpr,
+    vacancy_bad_debt: -(loss_to_lease + vacancy_loss + delinquency_loss),
+    egi,
     opex,
     noi,
-    expense_ratio: grossCollected > 0 ? opex / grossCollected : 0,
+    expense_ratio: egi > 0 ? opex / egi : 0,
   }
 }
 
-/**
- * All 8 expense categories with per-unit defaults.
- * Management is 5% of Gross Collected Income.
- */
-function expertOpEx(deal: DealInput, grossCollected: number, units: number): number {
-  const insurance = Math.max(safeNum(deal.insurance), INSURANCE_PER_UNIT * units)
+// ─── Expert Expenses (8 categories) ──────────────────────────────────────────
+
+function expertOpEx(deal: DealInput, egi: number, units: number): number {
   const taxes = safeNum(deal.property_taxes)
-  const utilities = safeNum(deal.utilities) || UTILITIES_PER_UNIT * units
-  const rm = safeNum(deal.repairs_maintenance) || RM_PER_UNIT * units
-  const mgmt = Math.max(safeNum(deal.management_fee), grossCollected * MGMT_FEE_PCT)
-  const payroll = safeNum(deal.payroll) || PAYROLL_PER_UNIT * units
-  const admin = safeNum(deal.admin_fees) || ADMIN_PER_UNIT * units
-  const reserve = Math.max(safeNum(deal.reserves), RESERVE_PER_UNIT * units)
-  return insurance + taxes + utilities + rm + mgmt + payroll + admin + reserve
+  const insurance = safeNum(deal.insurance)
+  const utilities = safeNum(deal.utilities)
+  const rm = safeNum(deal.repairs_maintenance) > 0
+    ? safeNum(deal.repairs_maintenance)
+    : RM_PER_UNIT_DEFAULT * units
+  const mgmt = Math.max(safeNum(deal.management_fee), egi * MGMT_FEE_PCT)
+  const payroll = safeNum(deal.payroll)
+  const admin = safeNum(deal.admin_fees)
+  const reserves = Math.max(safeNum(deal.reserves), RESERVE_PER_UNIT * units)
+  return taxes + insurance + utilities + rm + mgmt + payroll + admin + reserves
 }
 
 // ─── Scenario Computation ─────────────────────────────────────────────────────
@@ -237,33 +228,37 @@ function computeScenario(
   postOptNoi: number,
   units: number,
   capexBudget: number,
-  ltv: number,
   rate: number
 ): Scenario {
   const exitCap = entryCap - EXIT_CAP_COMPRESSION
   const mao = entryCap > 0 ? noi / entryCap : 0
   const maoPerUnit = units > 0 ? mao / units : 0
   const allInBasis = mao + capexBudget
-  // Loan is on MAO (not all-in basis) per LJM framework
-  const loanAmount = mao * ltv
+
+  // LTC-based loan: 75% of all-in basis (purchase + capex)
+  const loanAmount = allInBasis * LTC_DEFAULT
   const monthlyRate = rate / 12
   const monthlyPayment = pmt(monthlyRate, AMORT_MONTHS, loanAmount)
   const annualDebtService = monthlyPayment * 12
   const dscr = annualDebtService > 0 ? noi / annualDebtService : 0
-  const equityRequired = allInBasis - loanAmount
-  // Exit valuation uses post-optimization NOI / exit cap
+
+  // Total equity needed (includes transaction costs)
+  const acquisitionCost = mao * 0.02
+  const opexReserve = mao * 0.015
+  const acquisitionFee = mao * 0.04
+  const totalUses = mao + capexBudget + acquisitionCost + opexReserve + acquisitionFee
+  const equityRequired = Math.max(0, totalUses - loanAmount)
+
+  // Exit valuation
   const exitValue = exitCap > 0 ? postOptNoi / exitCap : 0
-  // Equity Created = Exit Sale Value - All-in Basis
   const equityCreated = exitValue - allInBasis
-  // Corrected equity multiple formula:
-  // (exit_value - loan_balance_after_hold + cumulative_cash_flow) / equity_invested
+
+  // Equity multiple: (exit_value - loan_balance_5yr + cumulative_CF) / equity_required
+  const loanBalance5yr = loanBalance(monthlyRate, AMORT_MONTHS, loanAmount, HOLD_YEARS * 12)
   const annualCF = noi - annualDebtService
   const cumCF = annualCF * HOLD_YEARS
-  const loanBal = monthlyRate > 0
-    ? loanBalance(monthlyRate, AMORT_MONTHS, loanAmount, HOLD_YEARS * 12)
-    : loanAmount - (loanAmount / AMORT_MONTHS) * (HOLD_YEARS * 12)
   const equityMultiple = equityRequired > 0
-    ? (exitValue - loanBal + cumCF) / equityRequired
+    ? (exitValue - loanBalance5yr + cumCF) / equityRequired
     : 0
 
   return {
@@ -288,13 +283,6 @@ function computeScenario(
 
 // ─── Verdict ──────────────────────────────────────────────────────────────────
 
-/**
- * gapPct = (Sc2_MAO - asking) / asking
- * Positive  = asking is BELOW MAO → PROCEED
- * 0 to -0.1 = asking up to 10% above MAO → NEGOTIATE
- * -0.1 to -0.2 = 10-20% over MAO → PASS
- * < -0.2     = >20% over MAO → DO NOT PROCEED
- */
 function verdictFromGap(gapPct: number): { label: string; bg: string; fg: string } {
   if (gapPct >= 0) return { label: 'PROCEED', bg: '#16a34a', fg: '#ffffff' }
   if (gapPct > -0.1) return { label: 'NEGOTIATE', bg: '#d97706', fg: '#ffffff' }
@@ -357,7 +345,7 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
     severity: 3,
     likelihood: 3,
     score: 9,
-    notes: `LJM underwrites ${(VACANCY_DEFAULT * 100).toFixed(0)}% vacancy + ${(LTL_DEFAULT * 100).toFixed(0)}% LTL + ${(DELINQ_DEFAULT * 100).toFixed(0)}% delinquency. Any increase directly reduces NOI.`,
+    notes: `LJM underwrites ${(VACANCY_DEFAULT * 100).toFixed(0)}% vacancy + ${(DELINQUENCY_DEFAULT * 100).toFixed(0)}% delinquency. Any increase directly reduces NOI.`,
   })
 
   rows.push({
@@ -373,7 +361,7 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
     severity: 4,
     likelihood: 2,
     score: 8,
-    notes: 'If exit cap rises 50–100 bps above projected exit cap, exit value drops materially.',
+    notes: 'If exit cap rises 50–100 bps above projected, exit value drops materially.',
   })
 
   rows.push({
@@ -381,7 +369,7 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
     severity: 2,
     likelihood: 2,
     score: 4,
-    notes: 'Post-optimization NOI assumes 30% uplift. New supply or economic slowdown could limit upside.',
+    notes: `Post-optimization NOI assumes ${((POST_OPT_UPLIFT - 1) * 100).toFixed(0)}% uplift. New supply or slowdown could limit upside.`,
   })
 
   if (safeNum(deal.asking_price) > 2_000_000) {
@@ -410,141 +398,133 @@ function generateRiskRegister(deal: DealInput, expert: ExpertAnalysis): RiskRow[
 export function runDealEngine(deal: DealInput): AnalysisResult {
   const askingPrice = safeNum(deal.asking_price)
   const units = Math.max(safeNum(deal.units, 1), 1)
-  const ltv = safeNum(deal.ltv, LTV_DEFAULT)
   const rate = safeNum(deal.interest_rate, RATE_DEFAULT)
   const capexPerUnit = safeNum(deal.capex_per_unit, CAPEX_PER_UNIT_DEFAULT)
-  const capexBudget = capexPerUnit * units  // raw capex (for scenarios)
+  const total_capex = capexPerUnit * units * CAPEX_MULTIPLIER
 
-  // ── Expert Income: 3-tier loss waterfall ────────────────────────────────────
-  const { gpi, ltl, vac, delinq, grossCollected } = computeGrossCollected(deal)
+  // ── Expert Income ────────────────────────────────────────────────────────────
+  const {
+    gpr,
+    loss_to_lease,
+    vacancy_loss,
+    delinquency_loss,
+    gross_collected_income,
+    egi,
+  } = expertIncomeBreakdown(deal)
 
-  // ── Expert OpEx (8 categories) ──────────────────────────────────────────────
-  const total_opex = expertOpEx(deal, grossCollected, units)
-  const noi = grossCollected - total_opex
-  const expense_ratio = grossCollected > 0 ? total_opex / grossCollected : 0
+  const total_opex = expertOpEx(deal, egi, units)
+  const noi = egi - total_opex
+  const expense_ratio = egi > 0 ? total_opex / egi : 0
 
-  // ── Post-Optimization NOI (for exit valuation) ──────────────────────────────
+  // ── Post-Optimization NOI ────────────────────────────────────────────────────
   const postOptNoi = safeNum(deal.post_opt_noi_override) > 0
     ? safeNum(deal.post_opt_noi_override)
     : noi * POST_OPT_UPLIFT
 
-  // ── Sc2 (Moderate) MAO used as primary expert reference ─────────────────────
-  const sc2Cap = SCENARIO_CAPS[1]
-  const sc2ExitCap = sc2Cap - EXIT_CAP_COMPRESSION
-  const mao = sc2Cap > 0 ? noi / sc2Cap : 0
-  const maoPerUnit = units > 0 ? mao / units : 0
-  const allInBasis = mao + capexBudget
+  // ── Max Offer (NOI / desired_cap − CapEx) ────────────────────────────────────
+  const desiredCap = safeNum(deal.desired_cap_rate, DESIRED_CAP_DEFAULT)
+  const all_in_cost = desiredCap > 0 ? noi / desiredCap : 0
+  const max_offer = all_in_cost - total_capex
+  const cost_per_door = units > 0 ? all_in_cost / units : 0
 
-  // Loan on MAO (not all-in basis) — LJM framework
-  const loanAmount = mao * ltv
+  // ── Uses & Sources ───────────────────────────────────────────────────────────
+  const purchase_price = max_offer
+  const acquisition_cost = purchase_price > 0 ? purchase_price * 0.02 : 0
+  const opex_cash_reserve = purchase_price > 0 ? purchase_price * 0.015 : 0
+  const acquisition_fee = purchase_price > 0 ? purchase_price * 0.04 : 0
+  const total_uses = purchase_price + total_capex + acquisition_cost + opex_cash_reserve + acquisition_fee
+
+  // LTC: 75% of all-in cost (purchase + capex)
+  const loan_amount_ltc = all_in_cost * LTC_DEFAULT
+  const seller_carry = safeNum(deal.seller_carry)
+  const equity_required_ltc = Math.max(0, total_uses - loan_amount_ltc - seller_carry)
+
+  // ── Debt Service ─────────────────────────────────────────────────────────────
   const monthlyRate = rate / 12
-  const monthlyPayment = pmt(monthlyRate, AMORT_MONTHS, loanAmount)
-  const annualDebtService = monthlyPayment * 12
-  const dscr = annualDebtService > 0 ? noi / annualDebtService : 0
-  const equityRequired = allInBasis - loanAmount
-  const cap_rate = askingPrice > 0 ? noi / askingPrice : 0
-  const exitValue = sc2ExitCap > 0 ? postOptNoi / sc2ExitCap : 0
-  const annualCashFlow = noi - annualDebtService
-  const cashOnCash = equityRequired > 0 ? annualCashFlow / equityRequired : 0
-  // Corrected equity multiple
-  const cumCF = annualCashFlow * HOLD_YEARS
-  const loanBal = monthlyRate > 0
-    ? loanBalance(monthlyRate, AMORT_MONTHS, loanAmount, HOLD_YEARS * 12)
-    : loanAmount - (loanAmount / AMORT_MONTHS) * (HOLD_YEARS * 12)
-  const equityMultiple = equityRequired > 0
-    ? (exitValue - loanBal + cumCF) / equityRequired
+  const monthlyPayment = pmt(monthlyRate, AMORT_MONTHS, loan_amount_ltc)
+  const annual_debt_service_amort = monthlyPayment * 12
+  const dscr_amort = annual_debt_service_amort > 0 ? noi / annual_debt_service_amort : 0
+  const annual_cash_flow_amort = noi - annual_debt_service_amort
+
+  const annual_debt_service_io = loan_amount_ltc * rate
+  const dscr_io = annual_debt_service_io > 0 ? noi / annual_debt_service_io : 0
+  const annual_cash_flow_io = noi - annual_debt_service_io
+
+  // ── Exit & Equity Multiple ───────────────────────────────────────────────────
+  const exitCap = desiredCap - EXIT_CAP_COMPRESSION
+  const exitValue = exitCap > 0 ? postOptNoi / exitCap : 0
+  const loanBalance5yr = loanBalance(monthlyRate, AMORT_MONTHS, loan_amount_ltc, HOLD_YEARS * 12)
+  const cumCF = annual_cash_flow_amort * HOLD_YEARS
+  const equityMultiple = equity_required_ltc > 0
+    ? (exitValue - loanBalance5yr + cumCF) / equity_required_ltc
     : 0
-
-  // ── Max Offer / Uses / Sources / Debt (Winding Creek template) ─────────────
-  const desiredCap = safeNum(deal.desired_cap_rate, DESIRED_CAP_RATE_DEFAULT)
-  const totalCapex = capexBudget * CAPEX_CONTINGENCY_FACTOR  // +10% contingency +8% mgmt
-  const allInCost = desiredCap > 0 ? noi / desiredCap : 0
-  const maxOffer = Math.round((allInCost - totalCapex) / 1000) * 1000
-  const costPerDoor = units > 0 ? maxOffer / units : 0
-
-  // Uses
-  const purchasePrice = maxOffer
-  const acqCost = purchasePrice * 0.02
-  const opexReserve = purchasePrice * 0.015
-  const acqFee = purchasePrice * 0.04
-  const totalUses = purchasePrice + totalCapex + acqCost + opexReserve + acqFee
-
-  // Sources (LTC basis: 75% of purchase + capex)
-  const loanLTC = (purchasePrice + totalCapex) * 0.75
-  const sellerCarry = safeNum(deal.seller_carry)
-  const equityLTC = totalUses - loanLTC - sellerCarry
-
-  // Debt / IO
-  const annualDsIo = loanLTC * rate
-  const monthlyPaymentLTC = pmt(rate / 12, AMORT_MONTHS, loanLTC)
-  const annualDsAmort = monthlyPaymentLTC * 12
-  const dscrIo = annualDsIo > 0 ? noi / annualDsIo : 0
-  const dscrAmort = annualDsAmort > 0 ? noi / annualDsAmort : 0
-  const cfIo = noi - annualDsIo
-  const cfAmort = noi - annualDsAmort
+  const cashOnCash = equity_required_ltc > 0 ? annual_cash_flow_amort / equity_required_ltc : 0
+  const cap_rate = askingPrice > 0 ? noi / askingPrice : 0
 
   const expert: ExpertAnalysis = {
-    egi: grossCollected,
+    egi,
     total_opex,
     noi,
     expense_ratio,
     cap_rate,
-    mao,
-    mao_per_unit: maoPerUnit,
-    capex_budget: capexBudget,
-    all_in_basis: allInBasis,
+    mao: max_offer,
+    mao_per_unit: units > 0 ? max_offer / units : 0,
+    capex_budget: total_capex,
+    all_in_basis: all_in_cost,
     post_opt_noi: postOptNoi,
-    dscr,
-    dscr_pass: dscr >= 1.25,
-    equity_required: equityRequired,
+    dscr: dscr_amort,
+    dscr_pass: dscr_amort >= 1.25,
+    equity_required: equity_required_ltc,
     exit_value: exitValue,
     equity_multiple: equityMultiple,
-    annual_cash_flow: annualCashFlow,
+    annual_cash_flow: annual_cash_flow_amort,
     cash_on_cash: cashOnCash,
-    loan_amount: loanAmount,
-    annual_debt_service: annualDebtService,
-    // New XLSX fields
-    gross_collected_income: grossCollected,
-    loss_to_lease: -ltl,
-    vacancy_loss: -vac,
-    delinquency_loss: -delinq,
-    gpi,
-    max_offer: maxOffer,
-    all_in_cost: allInCost,
-    total_capex: totalCapex,
-    cost_per_door: costPerDoor,
-    purchase_price: purchasePrice,
-    acquisition_cost: acqCost,
-    opex_cash_reserve: opexReserve,
-    acquisition_fee: acqFee,
-    total_uses: totalUses,
-    loan_amount_ltc: loanLTC,
-    equity_required_ltc: equityLTC,
-    annual_debt_service_io: annualDsIo,
-    dscr_io: dscrIo,
-    annual_cash_flow_io: cfIo,
-    annual_cash_flow_amort: cfAmort,
-    dscr_amort: dscrAmort,
+    loan_amount: loan_amount_ltc,
+    annual_debt_service: annual_debt_service_amort,
+    // Income breakdown
+    gross_collected_income,
+    loss_to_lease: -loss_to_lease,
+    vacancy_loss: -vacancy_loss,
+    delinquency_loss: -delinquency_loss,
+    gpi: gpr,
+    // Offer & cost
+    max_offer,
+    all_in_cost,
+    total_capex,
+    cost_per_door,
+    // Uses
+    purchase_price,
+    acquisition_cost,
+    opex_cash_reserve,
+    acquisition_fee,
+    total_uses,
+    // Sources
+    loan_amount_ltc,
+    equity_required_ltc,
+    // Debt
+    annual_debt_service_io,
+    dscr_io,
+    annual_cash_flow_io,
+    annual_cash_flow_amort,
+    dscr_amort,
   }
 
-  // ── 3 Scenarios ─────────────────────────────────────────────────────────────
+  // ── Scenarios ────────────────────────────────────────────────────────────────
   const scenarios = SCENARIO_CAPS.map((cap, i) =>
-    computeScenario(SCENARIO_LABELS[i], cap, noi, postOptNoi, units, capexBudget, ltv, rate)
+    computeScenario(SCENARIO_LABELS[i], cap, noi, postOptNoi, units, total_capex, rate)
   )
 
-  // ── Verdict (based on gap between asking and Sc2 MAO) ───────────────────────
-  const sc2Mao = scenarios[1].mao
-  const gap = sc2Mao - askingPrice
+  // ── Verdict (max_offer vs asking price) ──────────────────────────────────────
+  const gap = max_offer - askingPrice
   const gapPct = askingPrice > 0 ? gap / askingPrice : 0
 
-  // ── Income Statements ───────────────────────────────────────────────────────
+  // ── Income Statements ─────────────────────────────────────────────────────────
   const t12 = t12IncomeStatement(deal)
   const broker_t2 = brokerT2IncomeStatement(deal)
   const pf = pfIncomeStatement(deal)
-  // expert_income uses same opex and 3-tier loss waterfall values computed above
   const expert_income = expertIncomeStatement(deal, total_opex)
 
-  // ── Property Display ─────────────────────────────────────────────────────────
+  // ── Property Display ──────────────────────────────────────────────────────────
   const occupancyDisplay = deal.occupied_pct != null
     ? `${(deal.occupied_pct * 100).toFixed(0)}%`
     : deal.occupancy_pct != null

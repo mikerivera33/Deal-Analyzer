@@ -83,16 +83,17 @@ export async function generateUnderwritingXlsx(
   rows.push([])
 
   // ── EXPENSES ────────────────────────────────────────────────────────────────
+  // POTENTIAL: matches dealEngine expertOpEx exactly (5% mgmt, $500/unit R&M, $150/unit reserves)
   const gci = ex.gross_collected_income
   const expPot = {
-    insurance: Math.max(deal.insurance ?? 0, 1200 * units),
+    insurance: deal.insurance ?? 0,
     taxes: deal.property_taxes ?? 0,
-    utilities: deal.utilities || 1456 * units,
-    rm: deal.repairs_maintenance || 750 * units,
+    utilities: deal.utilities ?? 0,
+    rm: (deal.repairs_maintenance ?? 0) > 0 ? (deal.repairs_maintenance ?? 0) : 500 * units,
     mgmt: Math.max(deal.management_fee ?? 0, gci * 0.05),
-    payroll: deal.payroll || 1100 * units,
-    admin: deal.admin_fees || 250 * units,
-    reserve: Math.max(deal.reserves ?? 0, 250 * units),
+    payroll: deal.payroll ?? 0,
+    admin: deal.admin_fees ?? 0,
+    reserve: Math.max(deal.reserves ?? 0, 150 * units),
   }
   const expCur = {
     insurance: deal.insurance ?? 0,
@@ -197,7 +198,7 @@ export async function generateUnderwritingXlsx(
     ['MAO (NOI / Cap Rate)', sc[0].mao, sc[1].mao, sc[2].mao],
     ['MAO per Unit', sc[0].mao_per_unit, sc[1].mao_per_unit, sc[2].mao_per_unit],
     ['All-in Basis (MAO + CapEx)', sc[0].all_in_basis, sc[1].all_in_basis, sc[2].all_in_basis],
-    ['Loan Amount (65% of MAO)', sc[0].loan_amount, sc[1].loan_amount, sc[2].loan_amount],
+    ['Loan Amount (75% LTC)', sc[0].loan_amount, sc[1].loan_amount, sc[2].loan_amount],
     ['Annual Debt Service', sc[0].annual_debt_service, sc[1].annual_debt_service, sc[2].annual_debt_service],
     ['DSCR', `${sc[0].dscr.toFixed(2)}x`, `${sc[1].dscr.toFixed(2)}x`, `${sc[2].dscr.toFixed(2)}x`],
     ['DSCR Pass (>=1.25x)', sc[0].dscr_pass ? 'PASS' : 'FAIL', sc[1].dscr_pass ? 'PASS' : 'FAIL', sc[2].dscr_pass ? 'PASS' : 'FAIL'],
@@ -210,9 +211,10 @@ export async function generateUnderwritingXlsx(
     ['Equity Multiple (5-yr hold)', sc[0].equity_multiple.toFixed(2) + 'x', sc[1].equity_multiple.toFixed(2) + 'x', sc[2].equity_multiple.toFixed(2) + 'x'],
     [],
     ['GAP TO ASKING PRICE'],
-    ['Asking Price', analysis.asking.price],
-    ['Gap to Sc2 MAO', analysis.asking.price - sc[1].mao],
-    ['Gap %', analysis.asking.price > 0 ? pct((analysis.asking.price - sc[1].mao) / analysis.asking.price) : '—'],
+    ['Asking Price', analysis.asking.price > 0 ? analysis.asking.price : '(call for offers)'],
+    ['LJM Max Offer (NOI / 9% cap − CapEx)', Math.round(analysis.expert.max_offer)],
+    ['Gap (Max Offer − Asking)', analysis.asking.price > 0 ? Math.round(analysis.asking.gap_to_sc2_mao) : '—'],
+    ['Gap %', analysis.asking.price > 0 ? pct(analysis.asking.gap_to_sc2_mao_pct) : '—'],
     ['Verdict', analysis.verdict.label],
     [],
     [FOOTER],
