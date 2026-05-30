@@ -129,7 +129,9 @@ export async function POST(request: NextRequest) {
     let manualDeal: DealInput | null = null
 
     if (demo) {
-      text = ''
+      // Use DEMO_DEAL directly — bypasses AI so empty text doesn't trigger needs_manual
+      const { DEMO_DEAL } = await import('@/lib/aiParser')
+      manualDeal = DEMO_DEAL
     } else if (manualRaw) {
       // Parse and validate manual deal JSON
       let parsed: unknown
