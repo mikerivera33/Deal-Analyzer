@@ -5,7 +5,7 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 
 interface ManualInputFormProps {
   initialDeal?: Partial<DealInput>
@@ -85,6 +85,13 @@ export function ManualInputForm({ initialDeal = {}, missing = [], onSubmit, load
 
   const [unitMix, setUnitMix] = useState<UnitMixRow[]>(initialDeal.unit_mix ?? [EMPTY_UNIT])
   const [notes, setNotes] = useState(initialDeal.notes ?? '')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advanced, setAdvanced] = useState({
+    capex_per_unit: initialDeal.capex_per_unit ?? '',
+    post_opt_noi_override: initialDeal.post_opt_noi_override ?? '',
+    ltv: initialDeal.ltv != null ? (initialDeal.ltv * 100).toString() : '',
+    interest_rate: initialDeal.interest_rate != null ? (initialDeal.interest_rate * 100).toString() : '',
+  })
 
   function num(v: string | number | undefined): number | undefined {
     const n = Number(v)
@@ -118,6 +125,10 @@ export function ManualInputForm({ initialDeal = {}, missing = [], onSubmit, load
       reserves: num(expenses.reserves),
       unit_mix: unitMix.filter((u) => u.unit_count > 0),
       notes: notes || undefined,
+      capex_per_unit: num(advanced.capex_per_unit),
+      post_opt_noi_override: num(advanced.post_opt_noi_override),
+      ltv: advanced.ltv !== '' ? (num(advanced.ltv) ?? 65) / 100 : undefined,
+      interest_rate: advanced.interest_rate !== '' ? (num(advanced.interest_rate) ?? 6.8) / 100 : undefined,
     }
     onSubmit(deal)
   }
@@ -222,6 +233,55 @@ export function ManualInputForm({ initialDeal = {}, missing = [], onSubmit, load
             </div>
           ))}
         </div>
+      </section>
+
+      {/* Advanced / Financing */}
+      <section>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen}
+        >
+          {advancedOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          Advanced / Financing
+        </button>
+        {advancedOpen && (
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Field
+              label="CapEx per Unit ($)"
+              name="capex_per_unit"
+              type="number"
+              value={advanced.capex_per_unit}
+              placeholder="10000"
+              onChange={(v) => setAdvanced((a) => ({ ...a, capex_per_unit: v }))}
+            />
+            <Field
+              label="Post-Opt NOI ($)"
+              name="post_opt_noi_override"
+              type="number"
+              value={advanced.post_opt_noi_override}
+              placeholder="auto (NOI × 1.30)"
+              onChange={(v) => setAdvanced((a) => ({ ...a, post_opt_noi_override: v }))}
+            />
+            <Field
+              label="LTV (%)"
+              name="ltv"
+              type="number"
+              value={advanced.ltv}
+              placeholder="65"
+              onChange={(v) => setAdvanced((a) => ({ ...a, ltv: v }))}
+            />
+            <Field
+              label="Interest Rate (%)"
+              name="interest_rate"
+              type="number"
+              value={advanced.interest_rate}
+              placeholder="6.8"
+              onChange={(v) => setAdvanced((a) => ({ ...a, interest_rate: v }))}
+            />
+          </div>
+        )}
       </section>
 
       {/* Notes */}
