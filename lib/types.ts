@@ -65,6 +65,16 @@ export interface DealInput {
   loss_to_lease_pct?: number
   vacancy_pct?: number
   delinquency_pct?: number
+  // Partner / return assumptions
+  pref_return_rate?: number        // default 0.07
+  equity_share_pct?: number        // default 0.20
+  time_to_proforma_months?: number // default 24
+  market_cap_rate?: number         // for refi, default 0.06
+  refi_ltv?: number                // default 0.75
+  refi_cost_pct?: number           // default 0.015
+  sale_cap_rate?: number           // default 0.065
+  sales_cost_pct?: number          // default 0.02
+  other_income_per_unit?: number   // $/unit for potential other income (default 200)
 }
 
 export interface IncomeStatement {
@@ -124,6 +134,42 @@ export interface ExpertAnalysis {
   annual_cash_flow_io: number
   annual_cash_flow_amort: number
   dscr_amort: number
+  // Current income (actual rents with waterfall)
+  current_gpr: number
+  current_gci: number
+  current_noi: number
+  dscr_current_io: number
+  annual_cash_flow_current_io: number
+  annual_cash_flow_proforma_io: number
+  annual_cash_flow_proforma_amort: number
+  // Partner equity & pref return
+  pref_return_rate: number
+  annual_pref_return: number
+  partner_equity: number
+  // Refinance analysis
+  refi_market_cap: number
+  refi_value: number
+  refi_loan: number
+  refi_cost_amount: number
+  refi_loan_payoff: number
+  refi_net_proceeds: number
+  refi_investor_capital_return: number
+  refi_investor_remaining: number
+  refi_net_cash: number
+  // Sale analysis
+  sale_cap: number
+  sale_value: number
+  sale_cost_amount: number
+  sale_loan_payoff: number
+  sale_net_proceeds: number
+  partner_capital_return: number
+  projected_gain: number
+  // Partner return on sale
+  equity_share_pct: number
+  equity_distributions: number
+  partner_pref_returns_total: number
+  partner_total_return: number
+  annualized_return: number
 }
 
 export interface Scenario {

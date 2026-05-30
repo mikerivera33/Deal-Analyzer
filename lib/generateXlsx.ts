@@ -21,13 +21,14 @@ export async function generateUnderwritingXlsx(
 
   const sc = analysis.scenarios
   const ex = analysis.expert
-  const exi = analysis.expert_income
   const t12 = analysis.t12
   const units = analysis.units
   const rate = deal.interest_rate ?? 0.068
   const ltlPct = deal.loss_to_lease_pct ?? 0.03
   const vacPct = deal.vacancy_pct ?? 0.04
   const delinqPct = deal.delinquency_pct ?? 0.02
+  const ioMonths = deal.io_months ?? 0
+  const timeToProforma = deal.time_to_proforma_months ?? 24
 
   // ── Pro-Forma Analysis Sheet (Winding Creek template layout) ────────────────
   // Col layout: A=Description, B=Benchmark, C=Rate/Unit, D=POTENTIAL, E=CURRENT (T-12)
@@ -39,7 +40,12 @@ export async function generateUnderwritingXlsx(
 
   // Property header with unit mix table in cols E+
   rows.push(['Property Name:', deal.property_name || '—', '', '', 'UNIT-MIX RENT TABLE'])
-  rows.push(['Property Address:', [deal.address, deal.city, deal.state].filter(Boolean).join(', ') || '—', '', '', 'Bedrooms', 'Bathrooms', '# Units', 'Potential Rent', 'Monthly', 'Annual'])
+  rows.push([
+    'Property Address:',
+    [deal.address, deal.city, deal.state].filter(Boolean).join(', ') || '—',
+    '', '',
+    'Bedrooms', 'Bathrooms', '# Units', 'Market Rent/Unit', 'Monthly', 'Annual',
+  ])
 
   // Unit mix rows alongside property details
   const unitMix = deal.unit_mix || []
@@ -57,7 +63,14 @@ export async function generateUnderwritingXlsx(
     const pd = propDetails[i] || ['', '']
     const u = unitMix[i]
     const uRow: Row = u
-      ? [`${u.bed_count}BR`, u.bath_count, u.unit_count, u.market_rent, u.unit_count * u.market_rent, u.unit_count * u.market_rent * 12]
+      ? [
+          `${u.bed_count}BR`,
+          u.bath_count,
+          u.unit_count,
+          u.market_rent,
+          u.unit_count * u.market_rent,
+          u.unit_count * u.market_rent * 12,
+        ]
       : []
     rows.push([...pd, '', '', ...uRow])
   }
@@ -70,21 +83,57 @@ export async function generateUnderwritingXlsx(
   rows.push([])
 
   // ── INCOME ──────────────────────────────────────────────────────────────────
-  rows.push(['INCOME', '', '', 'POTENTIAL', 'CURRENT (T-12)'])
-  rows.push(['Gross Potential Rent', '', '', Math.round(exi.gross_rental_income), Math.round(t12.gross_rental_income)])
-  const otherPotential = Math.round(exi.utility_reimbursement + exi.other_income)
-  const otherCurrent = Math.round(t12.utility_reimbursement + t12.other_income)
-  rows.push(['Other Income', '$200-$400/unit', `$${Math.round(otherPotential / Math.max(units, 1))}/unit`, otherPotential, otherCurrent])
-  rows.push(['Gross Potential Income', '', '', Math.round(exi.gpi), Math.round(t12.gpi)])
-  rows.push(['Loss to Lease', '0%-5%', pct(ltlPct), Math.round(ex.loss_to_lease), ''])
-  rows.push(['Vacancy Rate', '4%-8%', pct(vacPct), Math.round(ex.vacancy_loss), ''])
-  rows.push(['Delinquency', '2%-4%', pct(delinqPct), Math.round(ex.delinquency_loss), ''])
-  rows.push(['Gross Collected Income', '', '', Math.round(ex.gross_collected_income), Math.round(t12.egi)])
+  // POTENTIAL: market rents from unit mix
+  // CURRENT: actual rents from unit mix (or gross_rental_income fallback)
+  const potentialGpr = ex.gpi  // market-rent GPR
+  const currentGpr = ex.current_gpr
+
+  // Potential other income: other_income_per_unit * units (annual)
+  const otherIncomePerUnit = deal.other_income_per_unit ?? 200
+  const potentialOtherIncome = otherIncomePerUnit * units
+  const currentOtherIncome = Math.round((deal.other_income ?? 0) + (deal.utility_reimbursement ?? 0))
+
+  const potentialGpi = potentialGpr + potentialOtherIncome
+  const currentGpi = currentGpr + currentOtherIncome
+
+  // Apply waterfall to POTENTIAL
+  const potLtl = potentialGpr * ltlPct
+  const potAfterLtl = potentialGpr - potLtl
+  const potVac = potAfterLtl * vacPct
+  const potAfterVac = potAfterLtl - potVac
+  const potDelinq = potAfterVac * delinqPct
+  const potNetRent = potAfterVac - potDelinq
+  const potGci = potNetRent + potentialOtherIncome
+
+  // Apply waterfall to CURRENT
+  const curLtl = currentGpr * ltlPct
+  const curAfterLtl = currentGpr - curLtl
+  const curVac = curAfterLtl * vacPct
+  const curAfterVac = curAfterLtl - curVac
+  const curDelinq = curAfterVac * delinqPct
+  const curNetRent = curAfterVac - curDelinq
+  const curGci = curNetRent + currentOtherIncome
+
+  rows.push(['INCOME', '', '', 'POTENTIAL', 'CURRENT'])
+  rows.push(['Gross Potential Rent', '', '', Math.round(potentialGpr), Math.round(currentGpr)])
+  rows.push([
+    'Other Income',
+    '$200-$400/Unit',
+    `$${Math.round(otherIncomePerUnit)}/Unit`,
+    Math.round(potentialOtherIncome),
+    Math.round(currentOtherIncome),
+  ])
+  rows.push(['Gross Potential Income', '', '', Math.round(potentialGpi), Math.round(currentGpi)])
+  rows.push(['Loss to Lease', '0%-5%', pct(ltlPct), -Math.round(potLtl), -Math.round(curLtl)])
+  rows.push(['Vacancy Rate', '4%-8%', pct(vacPct), -Math.round(potVac), -Math.round(curVac)])
+  rows.push(['Delinquency', '4%-6%', pct(delinqPct), -Math.round(potDelinq), -Math.round(curDelinq)])
+  rows.push(['Gross Collected Income', '', '', Math.round(potGci), Math.round(curGci)])
   rows.push([])
 
   // ── EXPENSES ────────────────────────────────────────────────────────────────
-  // POTENTIAL: matches dealEngine expertOpEx exactly (5% mgmt, $500/unit R&M, $150/unit reserves)
-  const gci = ex.gross_collected_income
+  // POTENTIAL: expertOpEx logic (floors applied)
+  // CURRENT: T-12 actuals as reported
+  const gci = potGci  // potential GCI for mgmt pct calc
   const expPot = {
     insurance: deal.insurance ?? 0,
     taxes: deal.property_taxes ?? 0,
@@ -107,34 +156,62 @@ export async function generateUnderwritingXlsx(
   }
   const perUnit = (v: number) => units > 0 ? `$${Math.round(v / units)}/unit` : ''
 
-  rows.push(['EXPENSES', '', '', 'POTENTIAL', 'CURRENT (T-12)'])
-  rows.push(['Insurance', '$450-$700/unit', perUnit(expPot.insurance), Math.round(expPot.insurance), Math.round(expCur.insurance)])
-  rows.push(['Taxes', '0.5%-2.5% of PP', deal.asking_price ? pct(expPot.taxes / deal.asking_price, 2) : '', Math.round(expPot.taxes), Math.round(expCur.taxes)])
-  rows.push(['Utilities', '$700-$800/unit', perUnit(expPot.utilities), Math.round(expPot.utilities), Math.round(expCur.utilities)])
-  rows.push(['Repairs & Maintenance', '$700-$1,000/unit', perUnit(expPot.rm), Math.round(expPot.rm), Math.round(expCur.rm)])
-  rows.push(['Management', '3%-5%', pct(expPot.mgmt / Math.max(gci, 1), 2), Math.round(expPot.mgmt), Math.round(expCur.mgmt)])
-  rows.push(['Payroll', '$800-$1,100/unit', perUnit(expPot.payroll), Math.round(expPot.payroll), Math.round(expCur.payroll)])
-  rows.push(['General & Admin', '$200-$300/unit', perUnit(expPot.admin), Math.round(expPot.admin), Math.round(expCur.admin)])
-  rows.push(['Replacement Reserve', '$100-$250/unit', perUnit(expPot.reserve), Math.round(expPot.reserve), Math.round(expCur.reserve)])
+  rows.push(['EXPENSES', '', '', 'POTENTIAL', 'CURRENT'])
+  rows.push([
+    'Insurance', '$450-$700/unit', perUnit(expPot.insurance),
+    Math.round(expPot.insurance), Math.round(expCur.insurance),
+  ])
+  rows.push([
+    'Taxes', '0.5%-2.5% of PP',
+    deal.asking_price ? pct(expPot.taxes / deal.asking_price, 2) : '',
+    Math.round(expPot.taxes), Math.round(expCur.taxes),
+  ])
+  rows.push([
+    'Utilities', '$700-$800/unit', perUnit(expPot.utilities),
+    Math.round(expPot.utilities), Math.round(expCur.utilities),
+  ])
+  rows.push([
+    'Repairs & Maintenance', '$700-$1,000/unit', perUnit(expPot.rm),
+    Math.round(expPot.rm), Math.round(expCur.rm),
+  ])
+  rows.push([
+    'Management', '3%-5%', pct(expPot.mgmt / Math.max(gci, 1), 2),
+    Math.round(expPot.mgmt), Math.round(expCur.mgmt),
+  ])
+  rows.push([
+    'Payroll', '$800-$1,100/unit', perUnit(expPot.payroll),
+    Math.round(expPot.payroll), Math.round(expCur.payroll),
+  ])
+  rows.push([
+    'General & Admin', '$200-$300/unit', perUnit(expPot.admin),
+    Math.round(expPot.admin), Math.round(expCur.admin),
+  ])
+  rows.push([
+    'Replacement Reserve', '$100-$250/unit', perUnit(expPot.reserve),
+    Math.round(expPot.reserve), Math.round(expCur.reserve),
+  ])
   rows.push(['Other Expenses', '', '', 0, 0])
+
   const totalExpPot = Object.values(expPot).reduce((s, v) => s + v, 0)
   const totalExpCur = Object.values(expCur).reduce((s, v) => s + v, 0)
   rows.push(['Total Expenses', '', '', Math.round(totalExpPot), Math.round(totalExpCur)])
   rows.push([])
 
-  const expRatioPot = gci > 0 ? totalExpPot / gci : 0
-  const expRatioCur = t12.egi > 0 ? totalExpCur / t12.egi : 0
+  const expRatioPot = potGci > 0 ? totalExpPot / potGci : 0
+  const expRatioCur = curGci > 0 ? totalExpCur / curGci : 0
   rows.push(['Expense Ratio', '', '', pct(expRatioPot), pct(expRatioCur)])
   rows.push([])
 
-  rows.push(['Net Operating Income (NOI)', '', '', Math.round(ex.noi), Math.round(t12.noi)])
+  const potNoi = potGci - totalExpPot
+  const curNoi = curGci - totalExpCur
+  rows.push(['Net Operating Income (NOI)', '', '', Math.round(potNoi), Math.round(curNoi)])
   rows.push([])
 
-  // ── MAX OFFER ───────────────────────────────────────────────────────────────
+  // ── OFFER ───────────────────────────────────────────────────────────────────
   const desiredCap = deal.desired_cap_rate ?? 0.09
   rows.push(['All In Cost (Desired Cap Rate)', 'market cap + 1.5-3%', pct(desiredCap), Math.round(ex.all_in_cost), ''])
   rows.push([])
-  rows.push(['Improvements/CapEx Cost', '', '', Math.round(ex.total_capex), ''])
+  rows.push(['Improvements/CapEx Cost:', '', '', Math.round(ex.total_capex), ''])
   rows.push(['Max Offer Amount', '', '', Math.round(ex.max_offer), ''])
   rows.push(['Cost Per Door', '', '', Math.round(ex.cost_per_door), ''])
   rows.push([])
@@ -152,41 +229,100 @@ export async function generateUnderwritingXlsx(
   // ── SOURCES ─────────────────────────────────────────────────────────────────
   rows.push(['SOURCES', '', '', '', ''])
   rows.push(['Loan Amount (75% LTC)', '', '75.00%', Math.round(ex.loan_amount_ltc), ''])
-  if ((deal.seller_carry ?? 0) > 0) {
-    rows.push(['Seller Carry', '', '', Math.round(deal.seller_carry ?? 0), ''])
-  } else {
-    rows.push(['Seller Carry (if applicable)', '', '', 0, ''])
-  }
-  rows.push(['Equity Required', '', '', Math.round(ex.equity_required_ltc), ''])
+  rows.push(['Seller Carry', '', '', Math.round(deal.seller_carry ?? 0), ''])
+  rows.push(['Equity Required', '', '', Math.round(ex.partner_equity), ''])
   rows.push(['Total Funding', '', '', Math.round(ex.total_uses), ''])
   rows.push([])
 
   // ── DEBT ────────────────────────────────────────────────────────────────────
-  const annualDsAmortDisplay = Math.round(ex.noi - ex.annual_cash_flow_amort)
-  const annualDsIoDisplay = Math.round(ex.annual_debt_service_io)
   rows.push(['DEBT', '', '', '', ''])
   rows.push(['Interest Rate', '', pct(rate, 2), '', ''])
   rows.push(['Term (months)', '', '360', '', ''])
-  rows.push(['Annual Debt Service (amortized)', '', '', annualDsAmortDisplay, ''])
-  if ((deal.io_months ?? 0) > 0) {
-    rows.push(['Annual Debt Service (I/O)', '', `${deal.io_months} months`, annualDsIoDisplay, ''])
-  } else {
-    rows.push(['Annual Debt Service (I/O)', '', '', annualDsIoDisplay, ''])
-  }
+  rows.push(['Annual Debt Service', '', '', Math.round(ex.annual_debt_service), ''])
+  rows.push([
+    'Annual Debt Service w/ I/O', '',
+    ioMonths > 0 ? `${ioMonths} months` : '',
+    Math.round(ex.annual_debt_service_io), '',
+  ])
   rows.push([])
 
-  rows.push(['Annual Cash Flow (I/O)', '', '', Math.round(ex.annual_cash_flow_io), ''])
-  rows.push(['Annual Cash Flow (amortized)', '', '', Math.round(ex.annual_cash_flow_amort), ''])
+  // ── PARTNER EQUITY ───────────────────────────────────────────────────────────
+  rows.push(['PARTNER EQUITY', '', '', '', ''])
+  rows.push(['Partner Equity', '', '', Math.round(ex.partner_equity), ''])
+  rows.push(['Pref Return on Equity', '', pct(ex.pref_return_rate, 1), '', ''])
+  rows.push(['Annual Pref Return', '', '', Math.round(ex.annual_pref_return), ''])
   rows.push([])
 
-  rows.push(['DSCR (I/O)', '', '', ex.dscr_io.toFixed(2) + 'x', ''])
-  rows.push(['DSCR (amortized)', '', '', ex.dscr_amort.toFixed(2) + 'x', ''])
+  // ── CASH FLOW ────────────────────────────────────────────────────────────────
+  rows.push(['CASH FLOW', '', '', '', ''])
+  rows.push([
+    'Annual Cash Flow - current post closing w/ I/O', '', '',
+    Math.round(ex.annual_cash_flow_current_io), '',
+  ])
+  rows.push([
+    'Annual Cash Flow - proforma with I/O', '', '',
+    Math.round(ex.annual_cash_flow_proforma_io), '',
+  ])
+  rows.push([
+    'Annual Cash Flow - proforma after I/O', '', '',
+    Math.round(ex.annual_cash_flow_proforma_amort), '',
+  ])
+  rows.push([])
+
+  // ── DSCR ────────────────────────────────────────────────────────────────────
+  rows.push(['DSCR (Current - assuming I/O)', '', '', ex.dscr_current_io.toFixed(2) + 'x', ''])
+  rows.push(['DSCR (Proforma) w/ I/O', '', '', ex.dscr_io.toFixed(2) + 'x', ''])
+  rows.push(['DSCR (Proforma) after I/O', '', '', ex.dscr_amort.toFixed(2) + 'x', ''])
+  rows.push([])
+  rows.push(['Time Period to Reach Potential Rents (months)', '', '', timeToProforma, ''])
+  rows.push([])
+
+  // ── REFINANCE OPTION AT PROFORMA ─────────────────────────────────────────────
+  rows.push(['REFINANCE OPTION AT PROFORMA', '', '', '', ''])
+  rows.push([
+    'Stabilized value (Enter market CAP rate)', '',
+    pct(ex.refi_market_cap, 2),
+    Math.round(ex.refi_value), '',
+  ])
+  rows.push(['Loan Amount (Enter LTV)', '', '75.00%', Math.round(ex.refi_loan), ''])
+  rows.push(['Refinance Cost', '1%-2%', pct(deal.refi_cost_pct ?? 0.015, 1), -Math.round(ex.refi_cost_amount), ''])
+  rows.push(['Loan payoff', '', '', -Math.round(ex.refi_loan_payoff), ''])
+  rows.push(['Net Proceeds', '', '', Math.round(ex.refi_net_proceeds), ''])
+  rows.push(['Investor capital return', '', '', Math.round(ex.refi_investor_capital_return), ''])
+  rows.push(['Investor capital remaining', '', '', Math.round(ex.refi_investor_remaining), ''])
+  rows.push(['Net cash proceeds', '', '', Math.round(ex.refi_net_cash), ''])
+  rows.push([])
+
+  // ── SALE OPTION AT PROFORMA ───────────────────────────────────────────────────
+  rows.push(['SALE OPTION AT PROFORMA', '', '', '', ''])
+  rows.push([
+    'Stabilized value (CAP rate)', '',
+    pct(ex.sale_cap, 2),
+    Math.round(ex.sale_value), '',
+  ])
+  rows.push(['Sales Cost', '2%-4%', pct(deal.sales_cost_pct ?? 0.02, 1), -Math.round(ex.sale_cost_amount), ''])
+  rows.push(['Loan payoff', '', '', -Math.round(ex.sale_loan_payoff), ''])
+  rows.push(['Net Proceeds', '', '', Math.round(ex.sale_net_proceeds), ''])
+  rows.push(['Return of Partner Capital', '', '', Math.round(ex.partner_capital_return), ''])
+  rows.push(['Projected Gain', '', '', Math.round(ex.projected_gain), ''])
+  rows.push([])
+
+  // ── PARTNER RETURN ON SALE AT PROFORMA ───────────────────────────────────────
+  rows.push(['PARTNER RETURN ON SALE AT PROFORMA', '', '', '', ''])
+  rows.push([
+    'Equity Distributions', '',
+    pct(ex.equity_share_pct, 1),
+    Math.round(ex.equity_distributions), '',
+  ])
+  rows.push(['Preferred Returns', '', '', -Math.round(ex.partner_pref_returns_total), ''])
+  rows.push(['Total', '', '', Math.round(ex.partner_total_return), ''])
+  rows.push(['Annualized Return', '', '', pct(ex.annualized_return, 1), ''])
   rows.push([])
 
   rows.push([FOOTER])
 
   const ws1 = XLSX.utils.aoa_to_sheet(rows)
-  ws1['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 16 }]
+  ws1['!cols'] = [{ wch: 42 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 16 }]
   XLSX.utils.book_append_sheet(wb, ws1, 'Pro-Forma Analysis')
 
   // ── Scenarios Sheet ──────────────────────────────────────────────────────────

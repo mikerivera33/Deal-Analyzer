@@ -131,6 +131,17 @@ function pfIncomeStatement(deal: DealInput): IncomeStatement {
 
 // ─── Expert Income (GPR → LTL → Vacancy → Delinquency → EGI) ─────────────────
 
+function currentGrossRent(deal: DealInput): number {
+  if (deal.unit_mix && deal.unit_mix.length > 0) {
+    const mixTotal = deal.unit_mix.reduce(
+      (sum, u) => sum + safeNum(u.unit_count) * safeNum(u.actual_rent),
+      0
+    )
+    if (mixTotal > 0) return mixTotal * 12
+  }
+  return safeNum(deal.gross_rental_income)
+}
+
 function grossPotentialRent(deal: DealInput): number {
   if (deal.unit_mix && deal.unit_mix.length > 0) {
     const mixTotal = deal.unit_mix.reduce(
@@ -448,18 +459,82 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
 
   const annual_debt_service_io = loan_amount_ltc * rate
   const dscr_io = annual_debt_service_io > 0 ? noi / annual_debt_service_io : 0
-  const annual_cash_flow_io = noi - annual_debt_service_io
+
+  // ── Current Income (actual rents with same waterfall) ────────────────────────
+  const ltlRate = safeNum(deal.loss_to_lease_pct, LOSS_TO_LEASE_DEFAULT)
+  const vacRate = safeNum(deal.vacancy_pct, VACANCY_DEFAULT)
+  const delinqRate = safeNum(deal.delinquency_pct, DELINQUENCY_DEFAULT)
+  const currentGpr = currentGrossRent(deal)
+  const currentLtl = currentGpr * ltlRate
+  const currentAfterLtl = currentGpr - currentLtl
+  const currentVac = currentAfterLtl * vacRate
+  const currentAfterVac = currentAfterLtl - currentVac
+  const currentDelinq = currentAfterVac * delinqRate
+  const currentNetRent = currentAfterVac - currentDelinq
+  const currentGci = currentNetRent + safeNum(deal.utility_reimbursement) + safeNum(deal.other_income)
+  const current_noi = currentGci - total_opex
+
+  // ── Partner Equity & Pref Return ─────────────────────────────────────────────
+  const prefRate = safeNum(deal.pref_return_rate, 0.07)
+  const equitySharePct = safeNum(deal.equity_share_pct, 0.20)
+  // partner_equity = total_uses - loan - seller_carry (can be negative if over-funded)
+  const partner_equity = total_uses - loan_amount_ltc - seller_carry
+  const annual_pref_return = partner_equity * prefRate
+
+  // ── Three Cash Flows ─────────────────────────────────────────────────────────
+  const annual_cash_flow_current_io = current_noi - annual_debt_service_io - annual_pref_return
+  const annual_cash_flow_proforma_io = noi - annual_debt_service_io - annual_pref_return
+  const annual_cash_flow_proforma_amort = noi - annual_debt_service_amort - annual_pref_return
+
+  // ── Three DSCR rows ──────────────────────────────────────────────────────────
+  const dscr_current_io = annual_debt_service_io > 0 ? current_noi / annual_debt_service_io : 0
 
   // ── Exit & Equity Multiple ───────────────────────────────────────────────────
   const exitCap = desiredCap - EXIT_CAP_COMPRESSION
   const exitValue = exitCap > 0 ? postOptNoi / exitCap : 0
   const loanBalance5yr = loanBalance(monthlyRate, AMORT_MONTHS, loan_amount_ltc, HOLD_YEARS * 12)
-  const cumCF = annual_cash_flow_amort * HOLD_YEARS
-  const equityMultiple = equity_required_ltc > 0
-    ? (exitValue - loanBalance5yr + cumCF) / equity_required_ltc
+  const cumCF = (noi - annual_debt_service_amort) * HOLD_YEARS
+  const absEquity = Math.abs(partner_equity)
+  const equityMultiple = absEquity > 0
+    ? (exitValue - loanBalance5yr + cumCF) / absEquity
     : 0
-  const cashOnCash = equity_required_ltc > 0 ? annual_cash_flow_amort / equity_required_ltc : 0
+  const cashOnCash = absEquity > 0 ? (noi - annual_debt_service_amort) / absEquity : 0
   const cap_rate = askingPrice > 0 ? noi / askingPrice : 0
+
+  // ── Refinance Analysis ───────────────────────────────────────────────────────
+  const TIME_MONTHS = safeNum(deal.time_to_proforma_months, 24)
+  const refiMarketCap = safeNum(deal.market_cap_rate, 0.06)
+  const refiLTV = safeNum(deal.refi_ltv, 0.75)
+  const refiCostPct = safeNum(deal.refi_cost_pct, 0.015)
+  const refi_value = refiMarketCap > 0 ? noi / refiMarketCap : 0
+  const refi_loan = refi_value * refiLTV
+  const refi_cost_amount = refi_loan * refiCostPct
+  const ioMonths = safeNum(deal.io_months, 0)
+  const amortMonthsAtRefi = Math.max(0, TIME_MONTHS - ioMonths)
+  const refi_loan_payoff = loanBalance(monthlyRate, AMORT_MONTHS, loan_amount_ltc, amortMonthsAtRefi)
+  const refi_net_proceeds = refi_loan - refi_cost_amount - refi_loan_payoff
+  const refi_investor_capital_return = Math.min(Math.max(refi_net_proceeds, 0), absEquity)
+  const refi_investor_remaining = absEquity - refi_investor_capital_return
+  const refi_net_cash = refi_net_proceeds + refi_investor_capital_return
+
+  // ── Sale Analysis ────────────────────────────────────────────────────────────
+  const saleCap = safeNum(deal.sale_cap_rate, 0.065)
+  const salesCostPct = safeNum(deal.sales_cost_pct, 0.02)
+  const sale_value = saleCap > 0 ? noi / saleCap : 0
+  const sale_cost_amount = sale_value * salesCostPct
+  const sale_loan_payoff = refi_loan_payoff  // same payoff date
+  const sale_net_proceeds = sale_value - sale_cost_amount - sale_loan_payoff
+  const partner_capital_return = absEquity
+  const projected_gain = sale_net_proceeds + partner_capital_return
+
+  // ── Partner Return on Sale ───────────────────────────────────────────────────
+  const equity_distributions = equitySharePct * projected_gain
+  const holdYears = TIME_MONTHS / 12
+  const partner_pref_returns_total = Math.abs(annual_pref_return) * holdYears
+  const partner_total_return = equity_distributions - partner_pref_returns_total
+  const annualized_return = absEquity > 0 && holdYears > 0
+    ? partner_total_return / absEquity / holdYears
+    : 0
 
   const expert: ExpertAnalysis = {
     egi,
@@ -474,10 +549,10 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
     post_opt_noi: postOptNoi,
     dscr: dscr_amort,
     dscr_pass: dscr_amort >= 1.25,
-    equity_required: equity_required_ltc,
+    equity_required: absEquity,
     exit_value: exitValue,
     equity_multiple: equityMultiple,
-    annual_cash_flow: annual_cash_flow_amort,
+    annual_cash_flow: noi - annual_debt_service_amort,
     cash_on_cash: cashOnCash,
     loan_amount: loan_amount_ltc,
     annual_debt_service: annual_debt_service_amort,
@@ -500,13 +575,49 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
     total_uses,
     // Sources
     loan_amount_ltc,
-    equity_required_ltc,
+    equity_required_ltc: absEquity,
     // Debt
     annual_debt_service_io,
     dscr_io,
-    annual_cash_flow_io,
-    annual_cash_flow_amort,
+    annual_cash_flow_io: noi - annual_debt_service_io,
+    annual_cash_flow_amort: noi - annual_debt_service_amort,
     dscr_amort,
+    // Current income
+    current_gpr: currentGpr,
+    current_gci: currentGci,
+    current_noi,
+    dscr_current_io,
+    annual_cash_flow_current_io,
+    annual_cash_flow_proforma_io,
+    annual_cash_flow_proforma_amort,
+    // Partner equity & pref return
+    pref_return_rate: prefRate,
+    annual_pref_return,
+    partner_equity,
+    // Refinance
+    refi_market_cap: refiMarketCap,
+    refi_value,
+    refi_loan,
+    refi_cost_amount,
+    refi_loan_payoff,
+    refi_net_proceeds,
+    refi_investor_capital_return,
+    refi_investor_remaining,
+    refi_net_cash,
+    // Sale
+    sale_cap: saleCap,
+    sale_value,
+    sale_cost_amount,
+    sale_loan_payoff,
+    sale_net_proceeds,
+    partner_capital_return,
+    projected_gain,
+    // Partner return on sale
+    equity_share_pct: equitySharePct,
+    equity_distributions,
+    partner_pref_returns_total,
+    partner_total_return,
+    annualized_return,
   }
 
   // ── Scenarios ────────────────────────────────────────────────────────────────
