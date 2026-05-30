@@ -38,13 +38,7 @@ export function DownloadsPanel({ jobId }: { jobId: string }) {
       <DownloadLink
         href={`${base}/underwriting_xlsx`}
         label="Underwriting XLSX"
-        sub="8 sheets · live formulas"
-        icon={<FileSpreadsheet className="h-4 w-4" />}
-      />
-      <DownloadLink
-        href={`${base}/synthesis_xlsx`}
-        label="Synthesis XLSX"
-        sub="Broker vs LJM side-by-side"
+        sub="Pro-forma · scenarios · risk register"
         icon={<FileSpreadsheet className="h-4 w-4" />}
       />
       <DownloadLink

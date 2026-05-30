@@ -81,6 +81,9 @@ export function ManualInputForm({ initialDeal = {}, missing = [], onSubmit, load
     management_fee: initialDeal.management_fee ?? '',
     utilities: initialDeal.utilities ?? '',
     reserves: initialDeal.reserves ?? '',
+    payroll: initialDeal.payroll ?? '',
+    repairs_maintenance: initialDeal.repairs_maintenance ?? '',
+    admin_fees: initialDeal.admin_fees ?? '',
   })
 
   const [unitMix, setUnitMix] = useState<UnitMixRow[]>(initialDeal.unit_mix ?? [EMPTY_UNIT])
@@ -123,6 +126,9 @@ export function ManualInputForm({ initialDeal = {}, missing = [], onSubmit, load
       management_fee: num(expenses.management_fee),
       utilities: num(expenses.utilities),
       reserves: num(expenses.reserves),
+      payroll: num(expenses.payroll),
+      repairs_maintenance: num(expenses.repairs_maintenance),
+      admin_fees: num(expenses.admin_fees),
       unit_mix: unitMix.filter((u) => u.unit_count > 0),
       notes: notes || undefined,
       capex_per_unit: num(advanced.capex_per_unit),
@@ -185,6 +191,9 @@ export function ManualInputForm({ initialDeal = {}, missing = [], onSubmit, load
           <Field label="Management Fee" name="management_fee" type="number" value={expenses.management_fee} onChange={(v) => setExpenses((p) => ({ ...p, management_fee: v }))} />
           <Field label="Utilities" name="utilities" type="number" value={expenses.utilities} onChange={(v) => setExpenses((p) => ({ ...p, utilities: v }))} />
           <Field label="Reserves" name="reserves" type="number" value={expenses.reserves} onChange={(v) => setExpenses((p) => ({ ...p, reserves: v }))} />
+          <Field label="Payroll (annual $)" name="payroll" type="number" value={expenses.payroll} placeholder="auto ($1,100/unit)" onChange={(v) => setExpenses((p) => ({ ...p, payroll: v }))} />
+          <Field label="Repairs & Maintenance (annual $)" name="repairs_maintenance" type="number" value={expenses.repairs_maintenance} placeholder="auto ($750/unit)" onChange={(v) => setExpenses((p) => ({ ...p, repairs_maintenance: v }))} />
+          <Field label="General & Admin (annual $)" name="admin_fees" type="number" value={expenses.admin_fees} placeholder="auto ($250/unit)" onChange={(v) => setExpenses((p) => ({ ...p, admin_fees: v }))} />
         </div>
       </section>
 

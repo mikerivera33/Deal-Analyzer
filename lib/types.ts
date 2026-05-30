@@ -43,6 +43,10 @@ export interface DealInput {
   management_fee?: number
   utilities?: number
   reserves?: number
+  // Additional expense categories
+  payroll?: number              // annual $
+  repairs_maintenance?: number  // annual $ (R&M)
+  admin_fees?: number           // annual $ (General & Admin)
   // Financing overrides (defaults: 65% LTV, 6.8% rate)
   ltv?: number
   interest_rate?: number
@@ -53,6 +57,14 @@ export interface DealInput {
   // Unit Mix
   unit_mix?: UnitMixRow[]
   notes?: string
+  // Deal structure
+  desired_cap_rate?: number     // desired all-in cap rate (default 0.09)
+  seller_carry?: number         // assumable/seller carry loan amount
+  io_months?: number            // interest-only months remaining
+  // Income loss assumptions (overrides for defaults: 3% LTL, 4% vac, 2% delinq)
+  loss_to_lease_pct?: number
+  vacancy_pct?: number
+  delinquency_pct?: number
 }
 
 export interface IncomeStatement {
@@ -87,6 +99,31 @@ export interface ExpertAnalysis {
   cash_on_cash: number
   loan_amount: number
   annual_debt_service: number
+  // New fields for XLSX display
+  gross_collected_income: number
+  loss_to_lease: number          // $ amount (negative)
+  vacancy_loss: number           // $ amount (negative)
+  delinquency_loss: number       // $ amount (negative)
+  gpi: number
+  max_offer: number
+  all_in_cost: number
+  total_capex: number
+  cost_per_door: number
+  // Uses
+  purchase_price: number
+  acquisition_cost: number
+  opex_cash_reserve: number
+  acquisition_fee: number
+  total_uses: number
+  // Sources
+  loan_amount_ltc: number
+  equity_required_ltc: number
+  // Debt
+  annual_debt_service_io: number
+  dscr_io: number
+  annual_cash_flow_io: number
+  annual_cash_flow_amort: number
+  dscr_amort: number
 }
 
 export interface Scenario {

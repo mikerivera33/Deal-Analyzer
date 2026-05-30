@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getJob } from '@/lib/blobStore'
 import { isValidUUID } from '@/lib/utils'
 
-const ALLOWED_TYPES = new Set(['advisory_pdf', 'deal_json', 'underwriting_xlsx', 'synthesis_xlsx'])
+const ALLOWED_TYPES = new Set(['advisory_pdf', 'deal_json', 'underwriting_xlsx'])
 
 export async function GET(
   _request: NextRequest,
@@ -54,18 +54,6 @@ export async function GET(
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': `attachment; filename="underwriting-${params.jobId}.xlsx"`,
-          'X-Content-Type-Options': 'nosniff',
-        },
-      })
-    }
-
-    case 'synthesis_xlsx': {
-      const { generateSynthesisXlsx } = await import('@/lib/generateXlsx')
-      const buf = await generateSynthesisXlsx(deal, analysis)
-      return new NextResponse(new Uint8Array(buf), {
-        headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="synthesis-${params.jobId}.xlsx"`,
           'X-Content-Type-Options': 'nosniff',
         },
       })

@@ -76,6 +76,12 @@ Map to this exact schema (all fields optional, use null if not found):
   "management_fee": number (annual dollars),
   "utilities": number (annual dollars),
   "reserves": number (annual dollars),
+  "payroll": number (annual payroll/staff expenses, dollars),
+  "repairs_maintenance": number (annual repairs & maintenance expenses, dollars),
+  "admin_fees": number (annual general & administrative expenses, dollars),
+  "desired_cap_rate": number (desired all-in cap rate e.g. 0.09 for 9%; null if not stated),
+  "seller_carry": number (assumable or seller carry loan amount, dollars; null if none),
+  "io_months": number (interest-only months remaining on assumable loan; null if none),
   "unit_mix": [{ "bed_count": number, "bath_count": number, "unit_count": number, "avg_sf": number, "market_rent": number, "actual_rent": number }],
   "notes": string
 }
@@ -114,6 +120,8 @@ function coerceDealInput(raw: unknown): DealInput | null {
     'pf_gross_rental', 'pf_other_income', 'pf_utility_reimb',
     'capex_per_unit',
     'property_taxes', 'insurance', 'management_fee', 'utilities', 'reserves',
+    'payroll', 'repairs_maintenance', 'admin_fees',
+    'desired_cap_rate', 'seller_carry', 'io_months',
   ] as const
   for (const f of numFields) {
     const n = safeNum(obj[f])
