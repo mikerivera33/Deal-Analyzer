@@ -202,7 +202,7 @@ async function callGemini(text: string): Promise<DealInput | null> {
     const { GoogleGenerativeAI } = await import('@google/generative-ai')
     const genAI = new GoogleGenerativeAI(key)
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-flash',
       generationConfig: { responseMimeType: 'application/json' },
     })
     const prompt = `${SYSTEM_PROMPT}\n\nDocument text:\n${text.slice(0, 50000)}`
