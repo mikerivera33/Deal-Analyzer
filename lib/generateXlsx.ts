@@ -325,6 +325,45 @@ export async function generateUnderwritingXlsx(
   ws1['!cols'] = [{ wch: 42 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 16 }]
   XLSX.utils.book_append_sheet(wb, ws1, 'Pro-Forma Analysis')
 
+  // ── Unit Mix Sheet (tab 2 — sits right after pro-forma) ─────────────────────
+  const unitMixFull = deal.unit_mix || []
+  const umRows: Row[] = [
+    [`${deal.property_name || 'Property'} — Unit Mix Detail`],
+    [],
+    ['Type', '# Units', 'Avg SF', 'Market Rent/Unit', 'Actual Rent/Unit', 'Pot. Monthly', 'Act. Monthly', 'Pot. Annual', 'Act. Annual'],
+  ]
+  for (const u of unitMixFull) {
+    umRows.push([
+      `${u.bed_count}BR/${u.bath_count}BA`,
+      u.unit_count,
+      u.avg_sf || 0,
+      u.market_rent,
+      u.actual_rent,
+      u.unit_count * u.market_rent,
+      u.unit_count * u.actual_rent,
+      u.unit_count * u.market_rent * 12,
+      u.unit_count * u.actual_rent * 12,
+    ])
+  }
+  const umTotUnits = unitMixFull.reduce((s, u) => s + u.unit_count, 0)
+  const umTotPotMo = unitMixFull.reduce((s, u) => s + u.unit_count * u.market_rent, 0)
+  const umTotActMo = unitMixFull.reduce((s, u) => s + u.unit_count * u.actual_rent, 0)
+  umRows.push(['TOTAL', umTotUnits, '', '', '', umTotPotMo, umTotActMo, umTotPotMo * 12, umTotActMo * 12])
+  umRows.push([])
+  umRows.push(['Gross Potential Rent (market)', '', '', '', '', '', '', umTotPotMo * 12, ''])
+  umRows.push(['Gross Collected Rent (actual)', '', '', '', '', '', '', '', umTotActMo * 12])
+  umRows.push(['Loss to Lease ($)', '', '', '', '', '', '', umTotPotMo * 12 - umTotActMo * 12, ''])
+  umRows.push(['Loss to Lease (%)', '', '', '', '', '', '', umTotPotMo > 0 ? pct((umTotPotMo - umTotActMo) / umTotPotMo) : '—', ''])
+  umRows.push([])
+  umRows.push([FOOTER])
+
+  const wsUM = XLSX.utils.aoa_to_sheet(umRows)
+  wsUM['!cols'] = [
+    { wch: 14 }, { wch: 8 }, { wch: 10 }, { wch: 16 }, { wch: 16 },
+    { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 16 },
+  ]
+  XLSX.utils.book_append_sheet(wb, wsUM, 'Unit Mix')
+
   // ── Scenarios Sheet ──────────────────────────────────────────────────────────
   const scenRows: Row[] = [
     [`${deal.property_name || 'Property'} — Scenario Analysis`],
@@ -372,6 +411,106 @@ export async function generateUnderwritingXlsx(
   ])
   ws3['!cols'] = [{ wch: 4 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 60 }]
   XLSX.utils.book_append_sheet(wb, ws3, 'Risk Register')
+
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  return Buffer.from(buf)
+}
+
+// ── Synthesis XLSX (executive one-page deal summary) ─────────────────────────
+
+export async function generateSynthesisXlsx(
+  deal: DealInput,
+  analysis: AnalysisResult
+): Promise<Buffer> {
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+  const ex = analysis.expert
+  const sc = analysis.scenarios
+  const t12 = analysis.t12
+
+  const rows: Row[] = []
+  rows.push(['LJM DEAL SUMMARY — EXECUTIVE SYNTHESIS'])
+  rows.push([`Generated: ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`])
+  rows.push([])
+
+  // Property
+  rows.push(['PROPERTY'])
+  rows.push(['Name', deal.property_name || '—'])
+  rows.push(['Address', [deal.address, deal.city, deal.state, deal.zip_code].filter(Boolean).join(', ') || '—'])
+  rows.push(['Units', analysis.units])
+  rows.push(['Year Built', deal.year_built || '—'])
+  rows.push(['Asking Price', deal.asking_price ? fmtMoney(deal.asking_price) : '—'])
+  rows.push(['Broker Cap Rate', deal.broker_cap_rate ? pct(deal.broker_cap_rate) : '—'])
+  rows.push(['Renovation', deal.renovation_status || '—'])
+  rows.push([])
+
+  // Verdict
+  rows.push(['VERDICT', analysis.verdict.label])
+  rows.push(['LJM Max Offer', fmtMoney(ex.max_offer)])
+  rows.push(['Gap vs Asking', deal.asking_price ? fmtMoney(analysis.asking.gap_to_sc2_mao) : '—'])
+  rows.push(['Gap %', deal.asking_price ? pct(analysis.asking.gap_to_sc2_mao_pct) : '—'])
+  rows.push([])
+
+  // Expert UW
+  rows.push(['EXPERT UNDERWRITING', 'LJM Expert', 'Broker T-12'])
+  rows.push(['EGI', fmtMoney(ex.egi), fmtMoney(t12.egi)])
+  rows.push(['Total OpEx', fmtMoney(ex.total_opex), fmtMoney(t12.opex)])
+  rows.push(['NOI', fmtMoney(ex.noi), fmtMoney(t12.noi)])
+  rows.push(['Cap Rate', pct(ex.cap_rate), deal.broker_cap_rate ? pct(deal.broker_cap_rate) : '—'])
+  rows.push(['Expense Ratio', pct(ex.expense_ratio), t12.egi > 0 ? pct(t12.opex / t12.egi) : '—'])
+  rows.push([])
+
+  // Financing
+  rows.push(['FINANCING'])
+  rows.push(['Loan Amount (75% LTC)', fmtMoney(ex.loan_amount)])
+  rows.push(['Annual Debt Service (Amort)', fmtMoney(ex.annual_debt_service)])
+  rows.push(['Annual Debt Service (I/O)', fmtMoney(ex.annual_debt_service_io)])
+  rows.push(['DSCR — I/O', ex.dscr_io.toFixed(2) + 'x'])
+  rows.push(['DSCR — Amort', ex.dscr_amort.toFixed(2) + 'x'])
+  rows.push(['Equity Required', fmtMoney(Math.max(0, ex.equity_required_ltc))])
+  rows.push([])
+
+  // MAO Scenarios (header col for each scenario)
+  const s = sc[0]; const b = sc[1]; const bull = sc[2]
+  rows.push(['MAO SCENARIOS', s.label, b.label, bull.label])
+  rows.push(['MAO', fmtMoney(s.mao), fmtMoney(b.mao), fmtMoney(bull.mao)])
+  rows.push(['MAO / Unit', fmtMoney(s.mao_per_unit), fmtMoney(b.mao_per_unit), fmtMoney(bull.mao_per_unit)])
+  rows.push(['DSCR', s.dscr.toFixed(2) + 'x', b.dscr.toFixed(2) + 'x', bull.dscr.toFixed(2) + 'x'])
+  rows.push(['Equity Required', fmtMoney(s.equity_required), fmtMoney(b.equity_required), fmtMoney(bull.equity_required)])
+  rows.push(['Exit Value (5yr)', fmtMoney(s.exit_value), fmtMoney(b.exit_value), fmtMoney(bull.exit_value)])
+  rows.push(['Equity Multiple', s.equity_multiple.toFixed(2) + 'x', b.equity_multiple.toFixed(2) + 'x', bull.equity_multiple.toFixed(2) + 'x'])
+  rows.push([])
+
+  // Cash Flow
+  rows.push(['CASH FLOW'])
+  rows.push(['Current NOI (I/O CF)', fmtMoney(ex.annual_cash_flow_current_io)])
+  rows.push(['Pro-Forma CF (I/O)', fmtMoney(ex.annual_cash_flow_proforma_io)])
+  rows.push(['Pro-Forma CF (Amort)', fmtMoney(ex.annual_cash_flow_proforma_amort)])
+  rows.push(['Cash-on-Cash Return', pct(ex.cash_on_cash)])
+  rows.push([])
+
+  // Exit
+  rows.push(['EXIT ANALYSIS', 'Refinance', 'Sale'])
+  rows.push(['Stabilized Value', fmtMoney(ex.refi_value), fmtMoney(ex.sale_value)])
+  rows.push(['Net Proceeds', fmtMoney(ex.refi_net_cash), fmtMoney(ex.sale_net_proceeds)])
+  rows.push(['Partner Total Return', '', fmtMoney(ex.partner_total_return)])
+  rows.push(['Annualized Return', '', pct(ex.annualized_return)])
+  rows.push([])
+
+  // Top risks
+  rows.push(['TOP RISKS', 'Severity', 'Likelihood', 'Score', 'Level'])
+  const topRisks = [...analysis.risk_register].sort((a, b) => b.score - a.score).slice(0, 5)
+  for (const r of topRisks) {
+    const lvl = r.score >= 16 ? 'RED' : r.score >= 10 ? 'ORANGE' : r.score >= 5 ? 'YELLOW' : 'GREEN'
+    rows.push([r.risk, r.severity, r.likelihood, r.score, lvl])
+  }
+  rows.push([])
+
+  rows.push([FOOTER])
+
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  ws['!cols'] = [{ wch: 38 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 10 }]
+  XLSX.utils.book_append_sheet(wb, ws, 'Deal Summary')
 
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
   return Buffer.from(buf)

@@ -42,6 +42,12 @@ export function DownloadsPanel({ jobId }: { jobId: string }) {
         icon={<FileSpreadsheet className="h-4 w-4" />}
       />
       <DownloadLink
+        href={`${base}/synthesis_xlsx`}
+        label="Synthesis XLSX"
+        sub="Executive one-page summary"
+        icon={<FileSpreadsheet className="h-4 w-4" />}
+      />
+      <DownloadLink
         href={`${base}/deal_json`}
         label="Deal JSON"
         sub="audit trail"

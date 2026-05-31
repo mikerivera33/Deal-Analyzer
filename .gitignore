@@ -33,5 +33,6 @@ next-env.d.ts
 .DS_Store
 Thumbs.db
 
-# Claude Code internal
-.claude/
+# Claude Code internal — ignore settings/auth but commit shared commands
+.claude/*
+!.claude/commands/
