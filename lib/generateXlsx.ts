@@ -88,9 +88,9 @@ export async function generateUnderwritingXlsx(
   const potentialGpr = ex.gpi  // market-rent GPR
   const currentGpr = ex.current_gpr
 
-  // Potential other income: other_income_per_unit * units (annual)
+  // Potential other income: per-unit projection + utility reimbursements (mirrors engine EGI)
   const otherIncomePerUnit = deal.other_income_per_unit ?? 200
-  const potentialOtherIncome = otherIncomePerUnit * units
+  const potentialOtherIncome = otherIncomePerUnit * units + (deal.utility_reimbursement ?? 0)
   const currentOtherIncome = Math.round((deal.other_income ?? 0) + (deal.utility_reimbursement ?? 0))
 
   const potentialGpi = potentialGpr + potentialOtherIncome
@@ -139,7 +139,7 @@ export async function generateUnderwritingXlsx(
     taxes: deal.property_taxes ?? 0,
     utilities: deal.utilities ?? 0,
     rm: (deal.repairs_maintenance ?? 0) > 0 ? (deal.repairs_maintenance ?? 0) : 500 * units,
-    mgmt: Math.max(deal.management_fee ?? 0, gci * 0.05),
+    mgmt: Math.max(deal.management_fee ?? 0, ex.egi * 0.05),
     payroll: deal.payroll ?? 0,
     admin: deal.admin_fees ?? 0,
     reserve: Math.max(deal.reserves ?? 0, 150 * units),
@@ -230,7 +230,7 @@ export async function generateUnderwritingXlsx(
   rows.push(['SOURCES', '', '', '', ''])
   rows.push(['Loan Amount (75% LTC)', '', '75.00%', Math.round(ex.loan_amount_ltc), ''])
   rows.push(['Seller Carry', '', '', Math.round(deal.seller_carry ?? 0), ''])
-  rows.push(['Equity Required', '', '', Math.round(ex.partner_equity), ''])
+  rows.push(['Equity Required', '', '', Math.round(ex.equity_required_ltc), ''])
   rows.push(['Total Funding', '', '', Math.round(ex.total_uses), ''])
   rows.push([])
 
@@ -314,7 +314,7 @@ export async function generateUnderwritingXlsx(
     pct(ex.equity_share_pct, 1),
     Math.round(ex.equity_distributions), '',
   ])
-  rows.push(['Preferred Returns', '', '', -Math.round(ex.partner_pref_returns_total), ''])
+  rows.push(['Preferred Returns', '', '', Math.round(ex.partner_pref_returns_total), ''])
   rows.push(['Total', '', '', Math.round(ex.partner_total_return), ''])
   rows.push(['Annualized Return', '', '', pct(ex.annualized_return, 1), ''])
   rows.push([])

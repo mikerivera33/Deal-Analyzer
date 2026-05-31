@@ -448,7 +448,6 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
   // LTC: 75% of all-in cost (purchase + capex)
   const loan_amount_ltc = all_in_cost * LTC_DEFAULT
   const seller_carry = safeNum(deal.seller_carry)
-  const equity_required_ltc = Math.max(0, total_uses - loan_amount_ltc - seller_carry)
 
   // ── Debt Service ─────────────────────────────────────────────────────────────
   const monthlyRate = rate / 12
@@ -472,7 +471,7 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
   const currentDelinq = currentAfterVac * delinqRate
   const currentNetRent = currentAfterVac - currentDelinq
   const currentGci = currentNetRent + safeNum(deal.utility_reimbursement) + safeNum(deal.other_income)
-  const current_noi = currentGci - total_opex
+  const current_noi = currentGci - totalReportedExpenses(deal)
 
   // ── Partner Equity & Pref Return ─────────────────────────────────────────────
   const prefRate = safeNum(deal.pref_return_rate, 0.07)
@@ -515,7 +514,7 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
   const refi_net_proceeds = refi_loan - refi_cost_amount - refi_loan_payoff
   const refi_investor_capital_return = Math.min(Math.max(refi_net_proceeds, 0), absEquity)
   const refi_investor_remaining = absEquity - refi_investor_capital_return
-  const refi_net_cash = refi_net_proceeds + refi_investor_capital_return
+  const refi_net_cash = refi_net_proceeds
 
   // ── Sale Analysis ────────────────────────────────────────────────────────────
   const saleCap = safeNum(deal.sale_cap_rate, 0.065)
@@ -531,7 +530,7 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
   const equity_distributions = equitySharePct * projected_gain
   const holdYears = TIME_MONTHS / 12
   const partner_pref_returns_total = Math.abs(annual_pref_return) * holdYears
-  const partner_total_return = equity_distributions - partner_pref_returns_total
+  const partner_total_return = equity_distributions + partner_pref_returns_total
   const annualized_return = absEquity > 0 && holdYears > 0
     ? partner_total_return / absEquity / holdYears
     : 0
@@ -549,7 +548,7 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
     post_opt_noi: postOptNoi,
     dscr: dscr_amort,
     dscr_pass: dscr_amort >= 1.25,
-    equity_required: absEquity,
+    equity_required: Math.max(0, partner_equity),
     exit_value: exitValue,
     equity_multiple: equityMultiple,
     annual_cash_flow: noi - annual_debt_service_amort,
@@ -575,7 +574,7 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
     total_uses,
     // Sources
     loan_amount_ltc,
-    equity_required_ltc: absEquity,
+    equity_required_ltc: Math.max(0, partner_equity),
     // Debt
     annual_debt_service_io,
     dscr_io,

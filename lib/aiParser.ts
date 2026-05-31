@@ -82,6 +82,13 @@ Map to this exact schema (all fields optional, use null if not found):
   "desired_cap_rate": number (desired all-in cap rate e.g. 0.09 for 9%; null if not stated),
   "seller_carry": number (assumable or seller carry loan amount, dollars; null if none),
   "io_months": number (interest-only months remaining on assumable loan; null if none),
+  "loss_to_lease_pct": number (loss-to-lease as decimal 0–1, e.g. 0.03 for 3%; null if not stated),
+  "vacancy_pct": number (vacancy rate as decimal 0–1, e.g. 0.07 for 7%; null if not stated),
+  "delinquency_pct": number (delinquency/bad-debt rate as decimal 0–1; null if not stated),
+  "pref_return_rate": number (preferred return rate as decimal 0–1, e.g. 0.07 for 7%; null if not stated),
+  "equity_share_pct": number (GP equity share as decimal 0–1, e.g. 0.20 for 20%; null if not stated),
+  "time_to_proforma_months": number (months to reach pro-forma rents, e.g. 24; null if not stated),
+  "other_income_per_unit": number (other income per unit per year in dollars, e.g. 200; null if not stated),
   "unit_mix": [{ "bed_count": number, "bath_count": number, "unit_count": number, "avg_sf": number, "market_rent": number, "actual_rent": number }],
   "notes": string
 }
@@ -122,6 +129,8 @@ function coerceDealInput(raw: unknown): DealInput | null {
     'property_taxes', 'insurance', 'management_fee', 'utilities', 'reserves',
     'payroll', 'repairs_maintenance', 'admin_fees',
     'desired_cap_rate', 'seller_carry', 'io_months',
+    'loss_to_lease_pct', 'vacancy_pct', 'delinquency_pct',
+    'pref_return_rate', 'equity_share_pct', 'time_to_proforma_months', 'other_income_per_unit',
   ] as const
   for (const f of numFields) {
     const n = safeNum(obj[f])
