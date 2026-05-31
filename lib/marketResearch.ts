@@ -37,46 +37,17 @@ function stateDemandDrivers(state: string, city: string): string[] {
 }
 
 function estimateRentComps(city: string, avgRent: number, units: number): RentComp[] {
-  const variance = 0.10  // ±10% for comparable properties
-  const comps: RentComp[] = [
-    {
-      name: `${city} Gardens Apartments`,
-      units: Math.round(units * 0.8),
-      occupancy_pct: 0.92,
-      avg_rent: Math.round(avgRent * (1 + variance)),
-      avg_sf: 780,
-      rent_per_sf: +(avgRent * (1 + variance) / 780).toFixed(2),
-      notes: 'Recently renovated, similar vintage',
-    },
-    {
-      name: `${city} Village Estates`,
-      units: Math.round(units * 1.2),
-      occupancy_pct: 0.88,
-      avg_rent: Math.round(avgRent * (1 - variance * 0.5)),
-      avg_sf: 750,
-      rent_per_sf: +(avgRent * (1 - variance * 0.5) / 750).toFixed(2),
-      notes: 'Similar vintage, value-add in progress',
-    },
-    {
-      name: `${city} Pines Community`,
-      units: units,
-      occupancy_pct: 0.95,
-      avg_rent: Math.round(avgRent * (1 + variance * 1.5)),
-      avg_sf: 820,
-      rent_per_sf: +(avgRent * (1 + variance * 1.5) / 820).toFixed(2),
-      notes: 'Upgraded units, Class B+ quality',
-    },
-    {
-      name: `${city} Creek Apartments`,
-      units: Math.round(units * 0.6),
-      occupancy_pct: 0.85,
-      avg_rent: Math.round(avgRent * (1 - variance)),
-      avg_sf: 720,
-      rent_per_sf: +(avgRent * (1 - variance) / 720).toFixed(2),
-      notes: 'Unimproved, older vintage — comp floor',
-    },
+  const variance = 0.10
+  const make = (name: string, unitMult: number, occ: number, mult: number, sf: number, notes: string): RentComp => {
+    const rent = Math.round(avgRent * mult)
+    return { name, units: Math.round(units * unitMult), occupancy_pct: occ, avg_rent: rent, avg_sf: sf, rent_per_sf: +(rent / sf).toFixed(2), notes }
+  }
+  return [
+    make(`${city} Gardens Apartments`,  0.8, 0.92, 1 + variance,         780, 'Recently renovated, similar vintage'),
+    make(`${city} Village Estates`,     1.2, 0.88, 1 - variance * 0.5,   750, 'Similar vintage, value-add in progress'),
+    make(`${city} Pines Community`,     1.0, 0.95, 1 + variance * 1.5,   820, 'Upgraded units, Class B+ quality'),
+    make(`${city} Creek Apartments`,    0.6, 0.85, 1 - variance,         720, 'Unimproved, older vintage — comp floor'),
   ]
-  return comps
 }
 
 // ─── AI-Powered Market Research ───────────────────────────────────────────────

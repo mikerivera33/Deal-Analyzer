@@ -28,9 +28,3 @@ jobs:
 
       - name: Next.js build
         run: npm run build
-        env:
-          # Stub env vars so build doesn't fail on missing keys
-          OPENAI_API_KEY: stub
-          ANTHROPIC_API_KEY: stub
-          GEMINI_API_KEY: stub
-          BLOB_READ_WRITE_TOKEN: stub
