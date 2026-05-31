@@ -193,20 +193,26 @@ async function callAnthropic(text: string): Promise<DealInput | null> {
   try {
     const Anthropic = (await import('@anthropic-ai/sdk')).default
     const client = new Anthropic({ apiKey: key })
-    const resp = await Promise.race([
-      client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: text.slice(0, 50000) }],
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Anthropic timeout')), AI_TIMEOUT_MS)
-      ),
-    ])
-    const raw = resp.content.find((b) => b.type === 'text')?.text || '{}'
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    return jsonMatch ? coerceDealInput(safeParseJSON(jsonMatch[0])) : null
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
+    try {
+      const stream = client.messages.stream(
+        {
+          model: 'claude-opus-4-8',
+          max_tokens: 8192,
+          thinking: { type: 'adaptive' },
+          system: SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: text.slice(0, 50000) }],
+        },
+        { signal: controller.signal }
+      )
+      const resp = await stream.finalMessage()
+      const raw = resp.content.find((b) => b.type === 'text')?.text ?? '{}'
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      return jsonMatch ? coerceDealInput(safeParseJSON(jsonMatch[0])) : null
+    } finally {
+      clearTimeout(timer)
+    }
   } catch {
     return null
   }
