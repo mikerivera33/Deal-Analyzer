@@ -177,7 +177,9 @@ async function fetchViaAnthropic(city: string, state: string, units: number): Pr
     const timeout = setTimeout(() => controller.abort(), 25000)
 
     try {
-      const response = await client.messages.create({
+      // Stream + finalMessage(): the skill's default for adaptive-thinking
+      // requests, which can produce extended thinking before the answer.
+      const stream = client.messages.stream({
         model: 'claude-opus-4-8',
         max_tokens: 2048,
         thinking: { type: 'adaptive' },
@@ -186,6 +188,7 @@ async function fetchViaAnthropic(city: string, state: string, units: number): Pr
           content: `Provide current multifamily real estate market data for ${city}, ${state} as a JSON object only. Include 4 comparable apartment properties, cap rate segments for this market, 5 demand drivers, market vacancy rate, estimated insurance per unit, and property tax rate. The subject property has ${units} units. All figures should reflect 2024-2025 market conditions. Output ONLY valid JSON with keys: rent_comps (array), cap_rate_segments (array), demand_drivers (array of strings), market_vacancy_pct (decimal), avg_rent_growth_pct (decimal), insurance_per_unit_est (number), tax_rate_est (decimal).`,
         }],
       }, { signal: controller.signal })
+      const response = await stream.finalMessage()
 
       clearTimeout(timeout)
       const textBlock = response.content.find(b => b.type === 'text')
