@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuid } from 'uuid'
 import { storeJob, getJob } from '@/lib/blobStore'
-import type { Job, DealInput } from '@/lib/types'
+import type { Job, DealInput, MarketData } from '@/lib/types'
 import { isSafeUrl } from '@/lib/utils'
 
 // Rate limiting note: enforce per-IP limits via Vercel middleware or an upstream proxy.
@@ -10,7 +10,7 @@ const MAX_URL_LENGTH = 2048
 const ALLOWED_EXTENSIONS = new Set(['pdf', 'xlsx', 'xls', 'csv', 'txt'])
 const ALLOWED_EXTENSIONS_LIST = 'pdf, xlsx, xls, csv, txt'
 
-const STEPS = ['ingest', 'extract', 'reconcile', 'compute', 'generate']
+const STEPS = ['ingest', 'extract', 'research', 'reconcile', 'compute', 'generate']
 
 function makeSteps(activeIndex = 0) {
   return STEPS.map((step, i) => ({
@@ -42,55 +42,74 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
     let deal: DealInput
     let isDemo = false
     let missing: string[] = []
+    let market_data: MarketData | undefined
+
+    // STEPS order: ingest(0) → extract(1) → research(2) → reconcile(3) → compute(4) → generate(5)
 
     if (manualDeal) {
       deal = manualDeal
+      // Manual: skip extract + research, jump straight to reconcile
       const j1 = await getJob(jobId) as Job
-      await storeJob({ ...j1, steps: makeSteps(2) })
+      await storeJob({ ...j1, steps: makeSteps(3) })
     } else {
-      // Step 1: extract — call AI
+      // Step 1: extract — call AI (needs text)
+      const j1 = await getJob(jobId) as Job
+      await storeJob({ ...j1, steps: makeSteps(1) })
       const { parseDealFromText } = await import('@/lib/aiParser')
       const result = await parseDealFromText(text || '')
       deal = result.deal
       isDemo = result.isDemo
       missing = result.missing
-      const j1 = await getJob(jobId) as Job
-      await storeJob({ ...j1, steps: makeSteps(2) })
 
       // If critical fields missing → needs_manual
       if (missing.length > 0 && !isDemo) {
-        const j2 = await getJob(jobId) as Job
+        const jErr = await getJob(jobId) as Job
         await storeJob({
-          ...j2,
+          ...jErr,
           status: 'needs_manual',
-          steps: makeSteps(2),
+          steps: makeSteps(1),
           result: { deal, missing },
         })
         return
       }
+
+      // Step 2: research — now we have city/state from deal
+      const j2 = await getJob(jobId) as Job
+      await storeJob({ ...j2, steps: makeSteps(2) })
+      if (deal.city && deal.state) {
+        try {
+          const { fetchMarketData } = await import('@/lib/marketResearch')
+          const avgRent = deal.unit_mix && deal.unit_mix.length > 0
+            ? deal.unit_mix.reduce((s, u) => s + u.market_rent, 0) / deal.unit_mix.length
+            : undefined
+          market_data = await fetchMarketData(deal.city, deal.state, deal.units ?? 0, avgRent)
+        } catch {
+          // market research failure never blocks the pipeline
+        }
+      }
     }
 
-    // Step 2: reconcile
-    const j2 = await getJob(jobId) as Job
-    await storeJob({ ...j2, steps: makeSteps(3) })
+    // Step 3: reconcile
+    const j3 = await getJob(jobId) as Job
+    await storeJob({ ...j3, steps: makeSteps(3) })
 
-    // Step 3: compute
+    // Step 4: compute
+    const j4compute = await getJob(jobId) as Job
+    await storeJob({ ...j4compute, steps: makeSteps(4) })
     const { runDealEngine } = await import('@/lib/dealEngine')
     const analysis = runDealEngine(deal)
-    const j3 = await getJob(jobId) as Job
-    await storeJob({ ...j3, steps: makeSteps(4) })
 
-    // Step 4: generate
-    const j4 = await getJob(jobId) as Job
-    await storeJob({ ...j4, steps: makeSteps(5) })
+    // Step 5: generate
+    const j5 = await getJob(jobId) as Job
+    await storeJob({ ...j5, steps: makeSteps(5) })
 
     // Complete
-    const j5 = await getJob(jobId) as Job
+    const j6 = await getJob(jobId) as Job
     await storeJob({
-      ...j5,
+      ...j6,
       status: 'complete',
       steps: STEPS.map((step) => ({ step, status: 'complete' as const })),
-      result: { deal, analysis, missing },
+      result: { deal, analysis, missing, market_data },
     })
 
     // Sync to Airtable (fire-and-forget; never blocks or crashes the pipeline)

@@ -4,7 +4,7 @@ import { storeJob } from '@/lib/blobStore'
 import type { Job, DealInput } from '@/lib/types'
 import { isValidUUID } from '@/lib/utils'
 
-const STEPS = ['ingest', 'extract', 'reconcile', 'compute', 'generate']
+const STEPS = ['ingest', 'extract', 'research', 'reconcile', 'compute', 'generate']
 
 function clientError(err: unknown): string {
   if (err instanceof Error) {
@@ -49,11 +49,20 @@ export async function POST(
     const { runDealEngine } = await import('@/lib/dealEngine')
     const analysis = runDealEngine(deal)
 
+    // Best-effort market research (non-blocking)
+    let market_data
+    if (deal.city && deal.state) {
+      try {
+        const { fetchMarketData } = await import('@/lib/marketResearch')
+        market_data = await fetchMarketData(deal.city, deal.state, deal.units ?? 0)
+      } catch { /* non-fatal */ }
+    }
+
     await storeJob({
       ...job,
       status: 'complete',
       steps: STEPS.map((step) => ({ step, status: 'complete' as const })),
-      result: { deal, analysis },
+      result: { deal, analysis, market_data },
     })
 
     return NextResponse.json({ jobId: newJobId })

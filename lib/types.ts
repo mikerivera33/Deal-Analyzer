@@ -199,6 +199,41 @@ export interface RiskRow {
   notes: string
 }
 
+// ─── Market Research ──────────────────────────────────────────────────────────
+
+export interface RentComp {
+  name: string
+  address?: string
+  units?: number
+  occupancy_pct?: number
+  avg_rent: number
+  avg_sf?: number
+  rent_per_sf?: number
+  distance_mi?: number
+  notes?: string
+}
+
+export interface CapRateSegment {
+  segment: string
+  cap_rate_min: number
+  cap_rate_max: number
+  notes?: string
+}
+
+export interface MarketData {
+  location: string
+  rent_comps: RentComp[]
+  cap_rate_segments: CapRateSegment[]
+  demand_drivers: string[]
+  market_vacancy_pct?: number
+  submarket?: string
+  avg_rent_growth_pct?: number
+  insurance_per_unit_est?: number
+  tax_rate_est?: number
+  sources?: string[]
+  fetched_at?: string
+}
+
 export interface AnalysisResult {
   verdict: { label: string; bg: string; fg: string }
   asking: { price: number; gap_to_sc2_mao: number; gap_to_sc2_mao_pct: number }
@@ -225,6 +260,7 @@ export interface JobResult {
   missing?: string[]
   error?: string
   analysis?: AnalysisResult
+  market_data?: MarketData
 }
 
 export interface Job {

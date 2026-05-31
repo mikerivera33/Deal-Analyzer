@@ -454,7 +454,6 @@ export function runDealEngine(deal: DealInput): AnalysisResult {
   const monthlyPayment = pmt(monthlyRate, AMORT_MONTHS, loan_amount_ltc)
   const annual_debt_service_amort = monthlyPayment * 12
   const dscr_amort = annual_debt_service_amort > 0 ? noi / annual_debt_service_amort : 0
-  const annual_cash_flow_amort = noi - annual_debt_service_amort
 
   const annual_debt_service_io = loan_amount_ltc * rate
   const dscr_io = annual_debt_service_io > 0 ? noi / annual_debt_service_io : 0

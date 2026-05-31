@@ -5,6 +5,7 @@ import type { JobStep } from '@/lib/types'
 const STEP_LABELS: Record<string, string> = {
   ingest: 'Ingesting documents',
   extract: 'Extracting deal data',
+  research: 'Researching market data',
   reconcile: 'Reconciling fields',
   compute: 'Computing financials',
   generate: 'Generating report',
