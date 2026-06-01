@@ -278,4 +278,4 @@ export async function parseDealFromText(text: string): Promise<{
   return { deal, isDemo: false, missing }
 }
 
-export { DEMO_DEAL }
+export { DEMO_DEAL, coerceDealInput }
