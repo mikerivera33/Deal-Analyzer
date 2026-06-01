@@ -72,8 +72,8 @@ export function isSafeUrl(rawUrl: string): boolean {
   // Block metadata endpoint (cloud provider IMDS)
   if (host === '169.254.169.254' || host === 'metadata.google.internal') return false
 
-  // Block loopback and unspecified address (0.0.0.0 routes to loopback on Linux)
-  if (host === 'localhost' || host === '::1' || host === '0.0.0.0') return false
+  // Block loopback and unspecified addresses (0.0.0.0/:: route to loopback on Linux)
+  if (host === 'localhost' || host === '::1' || host === '::' || host === '0.0.0.0') return false
   if (/^127\./.test(host)) return false
 
   // Block private IPv4 ranges

@@ -68,7 +68,8 @@ export async function POST(
 
     return NextResponse.json({ jobId: newJobId })
   } catch (err: unknown) {
-    await storeJob({ ...job, status: 'error', error: clientError(err) }).catch(() => {})
-    return NextResponse.json({ error: clientError(err) }, { status: 500 })
+    const msg = clientError(err)
+    await storeJob({ ...job, status: 'error', error: msg }).catch(() => {})
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

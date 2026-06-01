@@ -50,7 +50,10 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
 
     if (manualDeal) {
       deal = manualDeal
-      await advanceStep(jobId, 3)  // skip extract + research for manual input
+      // Jump to reconcile (index 3); makeSteps(3) marks extract+research as 'complete'
+      // intentionally — collapsed skipped steps show as done in the progress UI.
+      // market_data will be undefined for manual jobs; callers must guard accordingly.
+      await advanceStep(jobId, 3)
     } else {
       const { parseDealFromText } = await import('@/lib/aiParser')
       const result = await parseDealFromText(text || '')
