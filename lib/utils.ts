@@ -37,7 +37,7 @@ export function loanBalance(rate: number, nper: number, pv: number, k: number): 
   return pv * Math.pow(1 + rate, k) - payment * ((Math.pow(1 + rate, k) - 1) / rate)
 }
 
-/** Coerce any value to a finite non-negative number; strips currency symbols/commas */
+/** Coerce any value to a finite number; strips currency symbols/commas. Returns fallback for null/NaN/Infinity. */
 export function safeNum(v: unknown, fallback = 0): number {
   if (v == null || v === '') return fallback
   if (typeof v === 'number') return isFinite(v) ? v : fallback
@@ -72,8 +72,8 @@ export function isSafeUrl(rawUrl: string): boolean {
   // Block metadata endpoint (cloud provider IMDS)
   if (host === '169.254.169.254' || host === 'metadata.google.internal') return false
 
-  // Block loopback
-  if (host === 'localhost' || host === '::1') return false
+  // Block loopback and unspecified address (0.0.0.0 routes to loopback on Linux)
+  if (host === 'localhost' || host === '::1' || host === '0.0.0.0') return false
   if (/^127\./.test(host)) return false
 
   // Block private IPv4 ranges

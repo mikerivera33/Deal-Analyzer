@@ -21,6 +21,8 @@ export async function GET(
   }
 
   const { deal, analysis, market_data } = job.result
+  const propName = deal.property_name || deal.address || 'deal'
+  const slug = propName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
 
   switch (params.type) {
     case 'deal_json': {
@@ -36,8 +38,6 @@ export async function GET(
     case 'advisory_pdf': {
       const { generateAdvisoryPdf } = await import('@/lib/generatePdf')
       const buf = await generateAdvisoryPdf(deal, analysis, market_data)
-      const propName = deal.property_name || deal.address || 'deal'
-      const slug = propName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
       return new NextResponse(new Uint8Array(buf), {
         headers: {
           'Content-Type': 'application/pdf',
@@ -50,8 +50,6 @@ export async function GET(
     case 'underwriting_xlsx': {
       const { generateUnderwritingXlsx } = await import('@/lib/generateXlsx')
       const buf = await generateUnderwritingXlsx(deal, analysis, market_data)
-      const propName = deal.property_name || deal.address || 'deal'
-      const slug = propName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
       return new NextResponse(new Uint8Array(buf), {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -64,8 +62,6 @@ export async function GET(
     case 'synthesis_xlsx': {
       const { generateSynthesisXlsx } = await import('@/lib/generateXlsx')
       const buf = await generateSynthesisXlsx(deal, analysis, market_data)
-      const propName = deal.property_name || deal.address || 'deal'
-      const slug = propName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
       return new NextResponse(new Uint8Array(buf), {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

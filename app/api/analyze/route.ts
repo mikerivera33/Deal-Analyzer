@@ -34,7 +34,8 @@ function clientError(err: unknown): string {
 }
 
 async function advanceStep(jobId: string, stepIndex: number, patch: Partial<Job> = {}) {
-  const current = await getJob(jobId) as Job
+  const current = await getJob(jobId)
+  if (!current) throw new Error(`Job not found in store: ${jobId}`)
   await storeJob({ ...current, steps: makeSteps(stepIndex), ...patch })
 }
 
@@ -49,6 +50,7 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
 
     if (manualDeal) {
       deal = manualDeal
+      await advanceStep(jobId, 3)  // skip extract + research for manual input
     } else {
       const { parseDealFromText } = await import('@/lib/aiParser')
       const result = await parseDealFromText(text || '')
@@ -72,9 +74,9 @@ async function processJob(jobId: string, text: string | null, manualDeal: DealIn
           // market research failure never blocks the pipeline
         }
       }
+      await advanceStep(jobId, 3)  // research done, reconcile in_progress
     }
 
-    await advanceStep(jobId, 3)  // reconcile
     await advanceStep(jobId, 4)  // compute
     const { runDealEngine } = await import('@/lib/dealEngine')
     const analysis = runDealEngine(deal)
