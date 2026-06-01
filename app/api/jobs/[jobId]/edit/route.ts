@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuid } from 'uuid'
 import { storeJob } from '@/lib/blobStore'
-import type { Job, DealInput } from '@/lib/types'
+import type { Job } from '@/lib/types'
 import { isValidUUID } from '@/lib/utils'
 
 const STEPS = ['ingest', 'extract', 'research', 'reconcile', 'compute', 'generate']
@@ -31,8 +31,10 @@ export async function POST(
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
-  const { deal } = body as { deal?: DealInput }
-  if (!deal || typeof deal !== 'object' || Array.isArray(deal)) {
+  const raw = (body as Record<string, unknown>).deal
+  const { coerceDealInput } = await import('@/lib/aiParser')
+  const deal = coerceDealInput(raw)
+  if (!deal) {
     return NextResponse.json({ error: 'deal required' }, { status: 400 })
   }
 

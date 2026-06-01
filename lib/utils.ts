@@ -76,6 +76,9 @@ export function isSafeUrl(rawUrl: string): boolean {
   if (host === 'localhost' || host === '::1' || host === '::' || host === '0.0.0.0') return false
   if (/^127\./.test(host)) return false
 
+  // Block IPv6-mapped IPv4 (e.g. ::ffff:127.0.0.1 → loopback, ::ffff:10.0.0.1 → private)
+  if (/^\[?::ffff:/i.test(host)) return false
+
   // Block private IPv4 ranges
   if (/^10\./.test(host)) return false
   if (/^192\.168\./.test(host)) return false
