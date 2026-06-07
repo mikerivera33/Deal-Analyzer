@@ -203,23 +203,20 @@ export async function POST(request: NextRequest) {
         // Treat redirects as blocked — the redirect target was never validated
         if (res.status >= 300 && res.status < 400) throw new Error('Redirect blocked')
         if (!res.ok) throw new Error('HTTP ' + res.status)
-        // Read at most 5 MB before slicing to text to prevent OOM from large responses
+        // Stream at most MAX_BODY_BYTES before decoding to prevent OOM on large responses
         const MAX_BODY_BYTES = 5 * 1024 * 1024
         const reader = res.body?.getReader()
+        if (!reader) throw new Error('Response body unavailable')
         const chunks: Uint8Array[] = []
         let bytesRead = 0
-        if (reader) {
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done || !value) break
-            chunks.push(value)
-            bytesRead += value.byteLength
-            if (bytesRead >= MAX_BODY_BYTES) { reader.cancel(); break }
-          }
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done || !value) break
+          chunks.push(value)
+          bytesRead += value.byteLength
+          if (bytesRead >= MAX_BODY_BYTES) { reader.cancel(); break }
         }
-        const html = new TextDecoder().decode(
-          chunks.reduce((acc, c) => { const a = new Uint8Array(acc.byteLength + c.byteLength); a.set(acc); a.set(c, acc.byteLength); return a }, new Uint8Array(0))
-        )
+        const html = new TextDecoder().decode(Buffer.concat(chunks))
         text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 50000)
       } catch {
         await storeJob({
