@@ -1,4 +1,5 @@
 import type { MarketData, RentComp, CapRateSegment } from './types'
+import { sanitizeString } from './utils'
 
 // ─── DFW Default Cap Rate Segments ───────────────────────────────────────────
 
@@ -199,7 +200,12 @@ export async function fetchMarketData(
   units: number,
   avgRent?: number
 ): Promise<MarketData> {
-  const location = `${city || 'Unknown'}, ${state || 'TX'}`
+  // Sanitize before any prompt interpolation to prevent prompt injection
+  const safeCity = sanitizeString(city) || 'Unknown'
+  const safeState = sanitizeString(state) || 'TX'
+  city = safeCity
+  state = safeState
+  const location = `${city}, ${state}`
 
   // Try Gemini first (has Google Search grounding for real-time data)
   try {

@@ -136,10 +136,11 @@ export async function POST(request: NextRequest) {
       } catch {
         return NextResponse.json({ error: 'Invalid JSON in manual field' }, { status: 400 })
       }
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      const { coerceDealInput } = await import('@/lib/aiParser')
+      manualDeal = coerceDealInput(parsed)
+      if (!manualDeal) {
         return NextResponse.json({ error: 'Invalid deal data' }, { status: 400 })
       }
-      manualDeal = parsed as DealInput
     } else if (file) {
       // Enforce file size limit
       if (file.size > MAX_FILE_BYTES) {
@@ -197,9 +198,25 @@ export async function POST(request: NextRequest) {
         const res = await fetch(urlField, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LJMDealAnalyzer/1.0)' },
           signal: AbortSignal.timeout(10000),
+          redirect: 'manual',  // prevent redirect to private IPs bypassing isSafeUrl
         })
+        // Treat redirects as blocked — the redirect target was never validated
+        if (res.status >= 300 && res.status < 400) throw new Error('Redirect blocked')
         if (!res.ok) throw new Error('HTTP ' + res.status)
-        const html = await res.text()
+        // Stream at most MAX_BODY_BYTES before decoding to prevent OOM on large responses
+        const MAX_BODY_BYTES = 5 * 1024 * 1024
+        const reader = res.body?.getReader()
+        if (!reader) throw new Error('Response body unavailable')
+        const chunks: Uint8Array[] = []
+        let bytesRead = 0
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done || !value) break
+          chunks.push(value)
+          bytesRead += value.byteLength
+          if (bytesRead >= MAX_BODY_BYTES) { reader.cancel(); break }
+        }
+        const html = new TextDecoder().decode(Buffer.concat(chunks))
         text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 50000)
       } catch {
         await storeJob({

@@ -134,7 +134,7 @@ function coerceDealInput(raw: unknown): DealInput | null {
   ] as const
   for (const f of numFields) {
     const n = safeNum(obj[f])
-    if (n > 0) deal[f] = n
+    if (isFinite(n) && obj[f] != null && obj[f] !== '') deal[f] = n
   }
 
   // unit_mix — validate each row
@@ -152,6 +152,9 @@ function coerceDealInput(raw: unknown): DealInput | null {
       .filter((u) => u.unit_count > 0)
     if (mix.length > 0) deal.unit_mix = mix
   }
+
+  // Require at least one meaningful field — reject empty objects
+  if (Object.keys(deal).length === 0) return null
 
   return deal
 }
@@ -278,4 +281,4 @@ export async function parseDealFromText(text: string): Promise<{
   return { deal, isDemo: false, missing }
 }
 
-export { DEMO_DEAL }
+export { DEMO_DEAL, coerceDealInput }
